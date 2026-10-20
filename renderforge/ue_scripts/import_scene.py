@@ -82,23 +82,31 @@ def import_textures():
 
 
 # ---------------- materials ----------------
-def make_master(name, with_base, with_normal):
+def make_master(name, with_base, with_normal, masked=False):
     path = f"{ROOT}/Materials/{name}"
     if eal.does_asset_exist(path):
         return eal.load_asset(path)
     mat = tools.create_asset(name, f"{ROOT}/Materials", unreal.Material, unreal.MaterialFactoryNew())
     mel = unreal.MaterialEditingLibrary
     mat.set_editor_property("two_sided", True)
+    if masked:
+        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
     if with_base:
         tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 0)
         tb.set_editor_property("parameter_name", "BaseColor")
         tb.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
         mel.connect_material_property(tb, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+        if os.environ.get("RF_EMISSIVE"):
+            mel.connect_material_property(tb, "RGB", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+        if masked:
+            mel.connect_material_property(tb, "A", unreal.MaterialProperty.MP_OPACITY_MASK)
     else:
         cv = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -500, 0)
         cv.set_editor_property("parameter_name", "Color")
         cv.set_editor_property("default_value", unreal.LinearColor(0.5, 0.5, 0.5, 1))
         mel.connect_material_property(cv, "", unreal.MaterialProperty.MP_BASE_COLOR)
+        if os.environ.get("RF_EMISSIVE"):
+            mel.connect_material_property(cv, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     if with_normal:
         tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 300)
         tn.set_editor_property("parameter_name", "Normal")
@@ -116,13 +124,15 @@ def make_materials(tex_paths):
         (True, False): make_master("M_RF_Tex", True, False),
         (True, True): make_master("M_RF_TexN", True, True),
         (False, True): make_master("M_RF_FlatN", False, True),
+        ("m", False): make_master("M_RF_TexM", True, False, True),
+        ("m", True): make_master("M_RF_TexNM", True, True, True),
     }
     mel = unreal.MaterialEditingLibrary
     out = {}
     for key, m in scene["materials"].items():
         has_b = bool(m["base"]) and m["base"] in tex_paths and eal.does_asset_exist(tex_paths[m["base"]])
         has_n = bool(m["normal"]) and m["normal"] in tex_paths and eal.does_asset_exist(tex_paths[m["normal"]])
-        parent = masters[(has_b, has_n)]
+        parent = masters[("m", has_n)] if (m.get("masked") and has_b) else masters[(has_b, has_n)]
         mi_path = f"{ROOT}/Materials/MI_{key}"
         if eal.does_asset_exist(mi_path):
             out[key] = eal.load_asset(mi_path)

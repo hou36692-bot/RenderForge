@@ -23,6 +23,9 @@ if __name__ == "__main__":
     mode, rdc, out = sys.argv[1:4]
     job = {"mode": mode, "rdc": rdc, "out": out}
     if len(sys.argv) > 4:
-        a, b = sys.argv[4].split("-")
-        job["range"] = [int(a), int(b)]
+        if sys.argv[4].endswith(".json"):
+            job["eids"] = json.load(open(sys.argv[4]))
+        else:
+            a, b = sys.argv[4].split("-")
+            job["range"] = [int(a), int(b)]
     sys.exit(run("rf_extract.py", job))

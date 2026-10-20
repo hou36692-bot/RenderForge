@@ -30,6 +30,7 @@ def main():
     log("opened", JOB["rdc"], "api", api)
 
     texinfo = {str(t.resourceId): t for t in ctrl.GetTextures()}
+    bufinfo = {str(b.resourceId): b for b in ctrl.GetBuffers()}
 
     def walk(a, path):
         name = a.GetName(sf)
@@ -189,7 +190,8 @@ def main():
     tex_dir = os.path.join(OUT, "textures")
     mesh_dir = os.path.join(OUT, "meshes")
     cb_dir = os.path.join(OUT, "cbuffers")
-    for d_ in (tex_dir, mesh_dir, cb_dir):
+    srv_dir = os.path.join(OUT, "srv")
+    for d_ in (tex_dir, mesh_dir, cb_dir, srv_dir):
         os.makedirs(d_, exist_ok=True)
 
     saved_tex = {}
@@ -243,6 +245,25 @@ def main():
             with open(p, "wb") as f:
                 f.write(data)
         return h
+
+    ps_discard = {}
+
+    def pixel_shader_discards(st):
+        """True if the bound pixel shader contains a discard/clip (alpha-tested / masked material)."""
+        sid = rid(st.GetShader(rd.ShaderStage.Pixel))
+        if sid in ps_discard:
+            return ps_discard[sid]
+        res_ = False
+        try:
+            refl = st.GetShaderReflection(rd.ShaderStage.Pixel)
+            if refl is not None:
+                targets = ctrl.GetDisassemblyTargets(True)
+                txt = ctrl.DisassembleShader(st.GetGraphicsPipelineObject(), refl, targets[0])
+                res_ = "discard" in txt
+        except Exception:
+            log("disasm fail", sid, traceback.format_exc())
+        ps_discard[sid] = res_
+        return res_
 
     def export_draw(a, path):
         ctrl.SetFrameEvent(a.eventId, True)
@@ -304,7 +325,7 @@ def main():
                 attrs.append(rec)
                 seen[k] = rec
             meshes[mid] = {"id": mid, "verts": nverts, "indices": len(idx), "topology": topo, "attrs": attrs,
-                           "firstEid": a.eventId}
+                           "firstEid": a.eventId, "vmin": mn}
         # post-VS positions for this draw (instance 0)
         post = None
         try:
@@ -352,8 +373,31 @@ def main():
                 save_texture(r_)
         except Exception:
             log("tex fail eid", a.eventId, traceback.format_exc())
+        # vertex-shader buffer SRVs (manual vertex fetch: UVs / tangents often live here)
+        srvs = []
+        try:
+            for u in st.GetReadOnlyResources(rd.ShaderStage.Vertex):
+                dsc = u.descriptor
+                r_ = dsc.resource
+                if r_ == rd.ResourceId.Null() or rid(r_) not in bufinfo:
+                    continue
+                b = bufinfo[rid(r_)]
+                off = dsc.byteOffset
+                size = dsc.byteSize or (b.length - off)
+                rec = {"slot": u.access.index, "res": rid(r_), "off": off, "size": size,
+                       "format": fmt_name(dsc.format), "elemBytes": getattr(dsc, "elementByteSize", 0), "file": None}
+                if 0 < size <= JOB.get("max_srv_bytes", 64 * 1024 * 1024):
+                    fn = "srv_%s_%d_%d.bin" % (rid(r_).split("::")[-1], off, size)
+                    fp = os.path.join(srv_dir, fn)
+                    if not os.path.exists(fp):
+                        with open(fp, "wb") as f:
+                            f.write(ctrl.GetBufferData(r_, off, size))
+                    rec["file"] = "srv/" + fn
+                srvs.append(rec)
+        except Exception:
+            log("srv fail eid", a.eventId, traceback.format_exc())
         outs = [o for o in a.outputs if o != rd.ResourceId.Null()]
-        return {"eid": a.eventId, "mesh": mid, "name": a.GetName(sf), "path": path, "topology": topo,
+        return {"eid": a.eventId, "mesh": mid, "vsSrvs": srvs, "psDiscard": pixel_shader_discards(st), "name": a.GetName(sf), "path": path, "topology": topo,
                 "numInstances": a.numInstances, "postVS": post, "cbuffers": cbs, "textures": texs,
                 "vs": rid(st.GetShader(rd.ShaderStage.Vertex)), "ps": rid(st.GetShader(rd.ShaderStage.Pixel)),
                 "rts": [rid(o) for o in outs]}

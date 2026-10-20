@@ -25,9 +25,11 @@ def vertex_normals(pos, idx):
     return n / np.maximum(l, 1e-20)
 
 
-def sanitize_mesh(pos, idx, uv, limit):
+def sanitize_mesh(pos, idx, uv, limit, valid=None):
     """Drop triangles with non-finite or absurdly distant vertices (unprojection of near-plane points), compact."""
     ok = np.isfinite(pos).all(1) & (np.abs(pos).max(1) < limit)
+    if valid is not None:
+        ok &= valid
     tri = idx.reshape(-1, 3)
     keep = ok[tri].all(1)
     tri = tri[keep]
@@ -39,34 +41,88 @@ def sanitize_mesh(pos, idx, uv, limit):
     return pos[used], remap[tri].reshape(-1).astype(np.uint32), (uv[used] if uv is not None else None)
 
 
-def pick_uv_normal(ex, mesh_id, pos, idx):
-    """Heuristically identify UV0 and normal among anonymous attributes (names are stripped in many games)."""
+def _srv_arrays(ex, draw, nverts, vmin):
+    """Decode vertex-shader buffer SRVs (manual vertex fetch) into per-vertex channel arrays for this mesh.
+
+    The buffers are usually pools shared by many meshes: element index = absolute vertex id (vmin + local index).
+    The tangent buffer has exactly 2 elements per vertex (TangentX, TangentZ), which tells us the pool size, and
+    the UV buffer then has an integer number of interleaved UV channels per vertex."""
+    raws = []
+    for sv in draw.get("vsSrvs", []):
+        if not sv["file"]:
+            continue
+        fmt = sv["format"]
+        raw = (ex.root / sv["file"]).read_bytes()
+        if fmt == "R16G16_FLOAT":
+            arr, comps = np.frombuffer(raw, dtype="<f2").astype(np.float32), 2
+        elif fmt == "R32G32_FLOAT":
+            arr, comps = np.frombuffer(raw, dtype="<f4"), 2
+        elif fmt == "R8G8B8A8_SNORM":
+            arr, comps = np.maximum(np.frombuffer(raw, dtype="i1").astype(np.float32) / 127.0, -1.0), 4
+        elif fmt == "R16G16B16A16_SNORM":
+            arr, comps = np.maximum(np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32767.0, -1.0), 4
+        else:
+            continue
+        n_el = len(arr) // comps
+        raws.append({"comps": comps, "fmt": fmt, "n_el": n_el, "data": arr[: n_el * comps].reshape(n_el, comps)})
+    pool = None
+    for r in raws:
+        if r["comps"] == 4 and "SNORM" in r["fmt"] and r["n_el"] % 2 == 0:
+            pool = r["n_el"] // 2
+            break
+    out = []
+    local = np.arange(nverts)
+    for r in raws:
+        if pool and r["n_el"] % pool == 0:
+            per = r["n_el"] // pool
+        elif nverts and r["n_el"] % nverts == 0 and vmin == 0:
+            per = r["n_el"] // nverts
+        else:
+            continue
+        if (vmin + nverts) * per > r["n_el"]:
+            continue
+        for k in range(per):
+            out.append({"comps": r["comps"], "fmt": r["fmt"], "chan": k, "per": per,
+                        "data": r["data"][(vmin + local) * per + k]})
+    return out
+
+
+def pick_uv_normal(ex, mesh_id, pos, idx, draw=None):
+    """Heuristically identify UV0 and normal among anonymous attributes / VS buffer SRVs (semantic names are stripped)."""
     attrs = ex.meshes[mesh_id]["attrs"]
+    n = len(pos)
     uv = None
     cands = []
     for i, a in enumerate(attrs):
         if a["perInstance"]:
             continue
-        arr = None
         if a["comps"] == 2 and uv is None:
             arr = ex.mesh_attr(mesh_id, i)
             if np.isfinite(arr).all() and np.abs(arr).max() < 1e4:
                 uv = arr
         elif a["comps"] == 4 and "SNORM" in a["format"]:
-            cands.append(i)
+            cands.append(ex.mesh_attr(mesh_id, i)[:, :3])
         elif a["comps"] == 3 and a["format"].endswith("FLOAT") and i != ex.position_attr_index(mesh_id):
-            cands.append(i)
+            cands.append(ex.mesh_attr(mesh_id, i)[:, :3])
+    if draw is not None:
+        vmin = ex.meshes[mesh_id].get("vmin", 0)
+        for sa in _srv_arrays(ex, draw, n, vmin):
+            if sa["comps"] == 2:
+                if uv is None and sa["chan"] == 0 and np.isfinite(sa["data"]).all() and np.abs(sa["data"]).max() < 1e4:
+                    uv = sa["data"].astype(np.float32)
+            elif sa["comps"] == 4 and "SNORM" in sa["fmt"]:
+                cands.append(sa["data"][:, :3])
     best, best_score = None, 0.3
     if cands and len(idx) >= 3:
         gn = vertex_normals(pos, idx)
-        for i in cands:
-            arr = ex.mesh_attr(mesh_id, i)[:, :3]
+        for arr in cands:
             ln = np.linalg.norm(arr, axis=1)
             if np.median(ln) < 0.8 or np.median(ln) > 1.2:
                 continue
-            score = float(np.mean(np.sum(arr / np.maximum(ln[:, None], 1e-9) * gn, axis=1)))
+            nn = arr / np.maximum(ln[:, None], 1e-9)
+            score = abs(float(np.mean(np.sum(nn * gn, axis=1))))
             if score > best_score:
-                best, best_score = arr / np.maximum(ln[:, None], 1e-9), score
+                best, best_score = nn, score
     return uv, best
 
 
@@ -171,10 +227,10 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
         scene["meshes"][mid] = {"dir": f"meshes/{mid}", "verts": int(len(pos)), "tris": int(len(idx) // 3),
                                 "has_nrm": nrm is not None, "has_uv": uv is not None}
 
-    def mat_key(base, normal):
-        key = f"mat_{(base or 'none').split('::')[-1]}_{(normal or 'none').split('::')[-1]}"
+    def mat_key(base, normal, masked=False):
+        key = f"mat_{(base or 'none').split('::')[-1]}_{(normal or 'none').split('::')[-1]}" + ("_m" if masked and base else "")
         if key not in scene["materials"]:
-            scene["materials"][key] = {"base": base, "normal": normal}
+            scene["materials"][key] = {"base": base, "normal": normal, "masked": bool(masked and base)}
             for t in (base, normal):
                 if t and t not in scene["textures"]:
                     scene["textures"][t] = {"file": str(ex.root / ex.data["textures"][t]["file"]),
@@ -191,14 +247,14 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
             report["skipped"] += 1
             continue
         base, normal = classify_textures(ex, d)
-        mk = mat_key(base, normal)
+        mk = mat_key(base, normal, d.get("psDiscard", False))
         W = M @ Ci
         if proj_score(W) < 1e-3:
             W, _ = regularize_planar(W, pos)
         if err < tol and proj_score(W) < 1e-3:
             W = W / W[3, 3]
             if d["mesh"] not in mesh_done:
-                uv, nrm = pick_uv_normal(ex, d["mesh"], pos[:, :3], idx)
+                uv, nrm = pick_uv_normal(ex, d["mesh"], pos[:, :3], idx, d)
                 if nrm is None:
                     nrm = vertex_normals(pos[:, :3].astype(np.float64), idx)
                 write_mesh(d["mesh"], pos[:, :3], nrm, uv, idx)
@@ -220,8 +276,8 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
                 continue
             world = (w[:, :3] / np.where(ok, w[:, 3], 1)[:, None])
             bid = f"b{d['eid']}_{k}"
-            uv, _ = pick_uv_normal(ex, d["mesh"], pos[:, :3], idx)
-            clean = sanitize_mesh(world, idx, uv, 5e5)
+            uv, _ = pick_uv_normal(ex, d["mesh"], pos[:, :3], idx, d)
+            clean = sanitize_mesh(world, idx, uv, 1.5e5, valid=vs[:, 3] > 1e-3)
             if clean is None:
                 report["skipped"] += 1
                 continue

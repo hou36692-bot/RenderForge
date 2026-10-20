@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "renderdoc-mcp": {
+      "command": "D:\\HOU\\RenderForge\\tools\\renderdoc-mcp\\bin\\renderdoc-mcp.exe",
+      "args": []
+    }
+  }
+}

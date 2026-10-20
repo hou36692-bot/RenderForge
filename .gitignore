@@ -5,7 +5,9 @@ workspace/
 __pycache__/
 *.pyc
 *.rdc
-ue_project/Intermediate/
-ue_project/Saved/
-ue_project/DerivedDataCache/
-ue_project/Binaries/
+# UE project: keep only the project file and config; generated content is rebuilt by the importer
+ue_project/RenderForgeUE/Content/
+ue_project/RenderForgeUE/Intermediate/
+ue_project/RenderForgeUE/Saved/
+ue_project/RenderForgeUE/DerivedDataCache/
+ue_project/RenderForgeUE/Binaries/

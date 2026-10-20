@@ -1,0 +1,11 @@
+tools/
+refs/
+workspace/
+.venv/
+__pycache__/
+*.pyc
+*.rdc
+ue_project/Intermediate/
+ue_project/Saved/
+ue_project/DerivedDataCache/
+ue_project/Binaries/

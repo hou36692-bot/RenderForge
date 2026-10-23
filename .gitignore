@@ -21,3 +21,5 @@ unity_project/RenderForgeUnity/Assets/RF/
 unity_project/RenderForgeUnity/Assets/RFTest/
 unity_project/RenderForgeUnity/*.csproj
 unity_project/RenderForgeUnity/*.sln*
+unity_project/RenderForgeUnity/Assets/RF.meta
+unity_project/RenderForgeUnity/Assets/RFTest.meta

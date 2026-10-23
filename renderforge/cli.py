@@ -1,4 +1,15 @@
-"""RenderForge command line: survey -> export -> build -> ue-import -> shot, per case.
+"""RenderForge command line. A toolbox, not one pipeline:
+
+  doctor                          what is installed here
+  plan --game wuwa --target unity which tools / recipe, and the known gaps
+  docs                            regenerate docs/TOOLBOX.md from toolbox/*.json
+  ingest-3dmigoto <case> --frame-dir <FrameAnalysis-...> [--game zzz]
+  build-model <case> [--game zzz]      model-space scene (no post-VS data)
+  ingest-unity <case> --bundle <file>  Unity bundle / serialized file -> Scene Package (no GPU capture)
+  match <case> --fingerprints <dir>    identify captured meshes among source meshes
+  unity-import <case>                  emit + import into headless Unity, render a PNG
+
+RenderDoc route, per case:  survey -> export -> build -> ue-import -> shot
 
   python -m renderforge survey  <case> --rdc <file.rdc>
   python -m renderforge export  <case> [--range A-B | --rt-count N]
@@ -108,13 +119,15 @@ def cmd_build(a):
 
 def cmd_ue_import(a):
     from .ue_run import run
-    extra = {"RF_SCENE": str(case_dir(a.case) / "build" / "scene.json"), "RF_CASE": ue_name(a.case)}
+    from .space import convert_scene
+    scene_dir = convert_scene(case_dir(a.case) / "build", case_dir(a.case) / "_scene_ue_space", "ue")
+    extra = {"RF_SCENE": str(Path(scene_dir) / "scene.json"), "RF_CASE": ue_name(a.case)}
     if a.max_instances:
         extra["RF_MAX_INSTANCES"] = str(a.max_instances)
     if a.emissive:
         extra["RF_EMISSIVE"] = "1"
     rc, logp = run("import_scene.py", extra, log=f"ue_import_{a.case}.log")
-    res = json.loads((case_dir(a.case) / "build" / "ue_import_result.json").read_text())
+    res = json.loads((Path(scene_dir) / "ue_import_result.json").read_text())
     print("ue import rc", rc, res)
     return 0 if res.get("ok") else 1
 
@@ -155,6 +168,102 @@ def cmd_compare(a):
     return 0
 
 
+def cmd_doctor(a):
+    from .toolbox import doctor
+    for name, ok, where, ver in doctor():
+        print(f"{'OK ' if ok else 'MISSING'} {name:24} {ver:14} {where}")
+    return 0
+
+
+def cmd_plan(a):
+    from .toolbox import plan
+    print(chr(10).join(plan(a.game, a.target)))
+    return 0
+
+
+def cmd_docs(a):
+    from .toolbox import docs
+    print("wrote docs/TOOLBOX.md,", docs(), "lines")
+    return 0
+
+
+def cmd_ingest_3dmigoto(a):
+    from .ingest_3dmigoto import ingest
+    c = load_case(a.case)
+    c.update({"source": "3dmigoto", "frame_dir": str(Path(a.frame_dir).resolve())})
+    if a.game:
+        c["game"] = a.game
+    save_case(a.case, c)
+    ref = Path(a.frame_dir).resolve().parent / "final-output.png"
+    r = ingest(a.frame_dir, case_dir(a.case) / "export", reference_png=ref)
+    print("ingest:", r)
+    return 0
+
+
+def cmd_build_model(a):
+    import numpy as np
+    from .build import build_model_space
+    from .solve import Extract
+    c = load_case(a.case)
+    games = json.loads((ROOT / "toolbox" / "games.json").read_text(encoding="utf-8"))["games"]
+    g = games.get(a.game or c.get("game", ""), {})
+    ex = Extract(case_dir(a.case) / "export")
+    max_ext = a.max_extent
+
+    def pick(d):
+        m = ex.meshes[d["mesh"]]
+        names = {x["name"]: i for i, x in enumerate(m["attrs"])}
+        if "POSITION0" not in names:
+            return False
+        p = ex.mesh_attr(d["mesh"], names["POSITION0"])[:, :3]
+        return float(np.ptp(p, axis=0).max()) < max_ext and m["indices"] // 3 >= a.min_tris
+
+    sc = build_model_space(case_dir(a.case) / "export", case_dir(a.case) / "build", g.get("source_space", "unity"), pick=pick, basis=g.get("model_basis"))
+    print("build-model:", sc["report"], "meshes", len(sc["meshes"]), "materials", len(sc["materials"]))
+    return 0
+
+
+def cmd_unity_import(a):
+    from .emit_unity import emit
+    from .unity_run import run
+    pkg = case_dir(a.case) / "unity_pkg"
+    print("emit:", emit(case_dir(a.case) / "build", pkg, ue_name(a.case)))
+    shots = case_dir(a.case) / "shots"
+    shots.mkdir(exist_ok=True)
+    rc, logp = run("RFImportScene.Run", {"RF_UNITY_PKG": str(pkg), "RF_UNITY_SHOT": str(shots / f"{a.case}_unity.png")}, log=f"unity_import_{a.case}.log", graphics=True)
+    print("unity rc", rc, (pkg / "unity_import_result.json").read_text() if (pkg / "unity_import_result.json").exists() else "no result")
+    return rc
+
+
+def cmd_match(a):
+    from .match import load_source_lods, match_extract
+    from .solve import Extract
+    src = load_source_lods(a.fingerprints)
+    ex = Extract(case_dir(a.case) / "export")
+    res = match_extract(ex, src)
+    (case_dir(a.case) / "asset_match.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+    sp = case_dir(a.case) / "build" / "scene.json"
+    if sp.exists():
+        sc = json.loads(sp.read_text(encoding="utf-8"))
+        for mid, r in res.items():
+            if mid in sc["meshes"]:
+                sc["meshes"][mid]["source"] = {"package": r["package"], "lod": r["lod"], "level": r["level"]}
+        sp.write_text(json.dumps(sc, indent=1), encoding="utf-8")
+    exact = sum(1 for r in res.values() if r["level"] == "exact")
+    print(f"source LODs {len(src)}; captured meshes {len(ex.meshes)}; matched {len(res)} (exact {exact})")
+    return 0
+
+
+def cmd_ingest_unity(a):
+    from .ingest_unity import ingest_bundle
+    c = load_case(a.case)
+    c.update({"source": "unity-bundle", "bundle": str(Path(a.bundle).resolve())})
+    save_case(a.case, c)
+    sc = ingest_bundle(a.bundle, case_dir(a.case) / "build")
+    print("ingest-unity:", sc["report"], "meshes", len(sc["meshes"]), "materials", len(sc["materials"]), "textures", len(sc["textures"]))
+    return 0
+
+
 def cmd_run(a):
     a.range, a.rt_count, a.max_instances, a.cmd, a.ticks = None, None, None, None, 1200
     for fn in (cmd_survey, cmd_export, cmd_build, cmd_ue_import, cmd_shot, cmd_compare):
@@ -167,9 +276,18 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="renderforge")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in (("survey", cmd_survey), ("export", cmd_export), ("build", cmd_build), ("ue-import", cmd_ue_import),
-                     ("shot", cmd_shot), ("compare", cmd_compare), ("run", cmd_run)):
+                     ("shot", cmd_shot), ("compare", cmd_compare), ("run", cmd_run),
+                     ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
+                     ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match)):
         p = sub.add_parser(name)
-        p.add_argument("case")
+        p.add_argument("case", nargs="?", default="")
+        p.add_argument("--game")
+        p.add_argument("--target", default="unreal")
+        p.add_argument("--frame-dir")
+        p.add_argument("--bundle")
+        p.add_argument("--fingerprints")
+        p.add_argument("--max-extent", type=float, default=3.0)
+        p.add_argument("--min-tris", type=int, default=100)
         p.add_argument("--rdc")
         p.add_argument("--range")
         p.add_argument("--rt-count", type=int)

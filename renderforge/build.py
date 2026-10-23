@@ -289,6 +289,97 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
             report["baked"] += 1
 
     scene["camera"] = camera_from_vp(C, 16 / 9)
+    if scene["instances"] and not scene["camera"]:
+        P = np.vstack([np.fromfile(out / scene["meshes"][i["mesh"]]["dir"] / "pos.f32", dtype="<f4").reshape(-1, 3) for i in scene["instances"]])
+        lo, hi = P.min(0), P.max(0)
+        c, r = (lo + hi) / 2, float(np.linalg.norm(hi - lo)) / 2
+        dist = r / np.tan(np.radians(15))
+        # orbit camera on the -forward axis of the source space (Unity: -Z, UE: -X), looking at the bounds centre
+        back = np.array([0, 0, -1.0]) if space == "unity" else np.array([-1.0, 0, 0])
+        up = np.array([0, 1.0, 0]) if space == "unity" else np.array([0, 0, 1.0])
+        fwd = -back
+        scene["camera"] = {"position": (c + back * dist).tolist(), "forward": fwd.tolist(), "up": up.tolist(),
+                           "right": np.cross(up, fwd).tolist(), "hfov_deg": 2 * np.degrees(np.arctan(np.tan(np.radians(15)) * 16 / 9)), "vfov_deg": 30.0, "auto": True}
+    scene["report"] = report
+    (out / "scene.json").write_text(json.dumps(scene, indent=1), encoding="utf-8")
+    return scene
+
+
+def build_model_space(export_dir, out_dir, space="unity", pick=None, min_tris=1, basis=None):
+    """Scene package from an extract that has no post-VS data (e.g. 3DMigoto Frame Analysis).
+    Meshes are placed at identity in their own model space; `space` tells emitters which convention that is."""
+    ex = Extract(export_dir)
+    out = Path(out_dir)
+    if out.exists():
+        shutil.rmtree(out)
+    (out / "meshes").mkdir(parents=True)
+    scene = {"space": space, "meshes": {}, "materials": {}, "instances": [], "textures": {}, "camera": None,
+             "vp": None, "vp_match": 0.0}
+    done = set()
+    report = {"draws": len(ex.draws), "placed": 0, "skipped": 0, "no_uv": 0}
+    for d in ex.draws:
+        if pick and not pick(d):
+            continue
+        mesh = ex.meshes[d["mesh"]]
+        names = {a["name"]: i for i, a in enumerate(mesh["attrs"])}
+        if "POSITION0" not in names or mesh["indices"] // 3 < min_tris:
+            report["skipped"] += 1
+            continue
+        mid = d["mesh"]
+        if mid not in done:
+            pos = ex.mesh_attr(mid, names["POSITION0"])[:, :3]
+            idx = np.fromfile(ex.root / "meshes" / mid / "idx.u32", dtype="u4")
+            if not np.isfinite(pos).all():
+                report["skipped"] += 1
+                continue
+            uv = ex.mesh_attr(mid, names["TEXCOORD0"])[:, :2] if "TEXCOORD0" in names and ex.meshes[mid]["attrs"][names["TEXCOORD0"]]["comps"] >= 2 else None
+            nrm = ex.mesh_attr(mid, names["NORMAL0"])[:, :3] if "NORMAL0" in names else None
+            if nrm is not None:
+                ln = np.linalg.norm(nrm, axis=1)
+                nrm = nrm / np.maximum(ln[:, None], 1e-9) if np.median(ln) > 0.5 else None
+            if nrm is None:
+                nrm = vertex_normals(pos.astype(np.float64), idx)
+            md = out / "meshes" / mid
+            md.mkdir()
+            if basis is not None:
+                B = np.asarray(basis, dtype=np.float64)
+                pos, nrm = pos @ B, nrm @ B
+            pos.astype("<f4").tofile(md / "pos.f32")
+            idx.astype("<u4").tofile(md / "idx.u32")
+            nrm.astype("<f4").tofile(md / "nrm.f32")
+            if uv is not None:
+                uv.astype("<f4").tofile(md / "uv.f32")
+            else:
+                report["no_uv"] += 1
+            scene["meshes"][mid] = {"dir": f"meshes/{mid}", "verts": int(len(pos)), "tris": int(len(idx) // 3), "has_nrm": True, "has_uv": uv is not None}
+            done.add(mid)
+        base = None
+        for t in d["textures"]:
+            info = ex.data["textures"].get(t["res"])
+            if info and info["file"] and "SRGB" in t["format"] and info["w"] >= 256:
+                base = t["res"]
+                break
+        key = f"mat_{(base or 'none')}"
+        if key not in scene["materials"]:
+            scene["materials"][key] = {"base": base, "normal": None, "masked": False}
+            if base and base not in scene["textures"]:
+                ti = ex.data["textures"][base]
+                scene["textures"][base] = {"file": str(ex.root / ti["file"]), "w": ti["w"], "h": ti["h"], "format": ti["format"]}
+        W = np.eye(4)
+        scene["instances"].append({"eid": d["eid"], "inst": 0, "mesh": mid, "matrix": W.flatten().tolist(), "location": [0.0, 0.0, 0.0],
+                                   "quat": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0], "material": key, "kind": "model-space"})
+        report["placed"] += 1
+    if scene["instances"] and not scene["camera"]:
+        P = np.vstack([np.fromfile(out / scene["meshes"][i["mesh"]]["dir"] / "pos.f32", dtype="<f4").reshape(-1, 3) for i in scene["instances"]])
+        lo, hi = P.min(0), P.max(0)
+        c, r = (lo + hi) / 2, float(np.linalg.norm(hi - lo)) / 2
+        dist = r / np.tan(np.radians(15))
+        # orbit camera on the -forward axis of the source space (Unity: -Z, UE: -X), looking at the bounds centre
+        back = np.array([0, 0, -1.0]) if space == "unity" else np.array([-1.0, 0, 0])
+        up = np.array([0, 1.0, 0]) if space == "unity" else np.array([0, 0, 1.0])
+        fwd = -back
+        scene["camera"] = {"position": (c + back * dist).tolist(), "forward": fwd.tolist(), "up": up.tolist(),
+                           "right": np.cross(up, fwd).tolist(), "hfov_deg": 2 * np.degrees(np.arctan(np.tan(np.radians(15)) * 16 / 9)), "vfov_deg": 30.0, "auto": True}
     scene["report"] = report
     (out / "scene.json").write_text(json.dumps(scene, indent=1), encoding="utf-8")
     return scene

@@ -11,3 +11,13 @@ ue_project/RenderForgeUE/Intermediate/
 ue_project/RenderForgeUE/Saved/
 ue_project/RenderForgeUE/DerivedDataCache/
 ue_project/RenderForgeUE/Binaries/
+unity_project/RenderForgeUnity/Library/
+unity_project/RenderForgeUnity/Temp/
+unity_project/RenderForgeUnity/Logs/
+unity_project/RenderForgeUnity/obj/
+unity_project/RenderForgeUnity/UserSettings/
+unity_project/RenderForgeUnity/Bundles/
+unity_project/RenderForgeUnity/Assets/RF/
+unity_project/RenderForgeUnity/Assets/RFTest/
+unity_project/RenderForgeUnity/*.csproj
+unity_project/RenderForgeUnity/*.sln*

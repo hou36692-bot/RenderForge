@@ -1,0 +1,202 @@
+{
+  "_comment": "Game profiles. A profile only selects tools and records facts/gaps for one game; it never changes other games. 'verified' lists what was actually run; 'gaps' what is known missing.",
+  "games": {
+    "wuwa": {
+      "name": "Wuthering Waves",
+      "engine": "unreal",
+      "engine_version": "UE4.26-class (per user's CUE4Parse setup)",
+      "source_space": "ue",
+      "install": "D:\\Wuthering Waves\\Wuthering Waves Game",
+      "packaging": "pak (pakchunk*.pak, ~55 chunks, AES-encrypted index/content)",
+      "capture": [
+        "renderdoc",
+        "3dmigoto"
+      ],
+      "capture_notes": "RenderDoc D3D11 captures exist (user-made, 590MB-2.1GB). WWMI is the 3DMigoto route.",
+      "source": [
+        "user-sourceprobe",
+        "cue4parse",
+        "fmodel"
+      ],
+      "frame_extractors": [
+        "rf-extract",
+        "wwmi-tools"
+      ],
+      "verified": [
+        "RenderDoc D3D11 capture -> UE 5.8 and Unity 6 scene (bridge scene, 19k instances, camera matched)",
+        "CUE4Parse fingerprints matched 53 captured meshes bit-exact",
+        "SourceProbe selftest"
+      ],
+      "gaps": [
+        "transparent / water / foliage passes not exported",
+        "sky + lighting not reconstructed",
+        "skinned/wind meshes baked at capture pose",
+        "mesh-to-source matching covers only previously fingerprinted packages",
+        "no bulk fingerprint index of all StaticMeshes",
+        "key handling stays inside the user's SourceProbe"
+      ]
+    },
+    "zzz": {
+      "name": "Zenless Zone Zero",
+      "engine": "unity",
+      "engine_version": "Unity (HoYo custom bundles); 3.2.0 in user's evidence",
+      "source_space": "unity",
+      "install": "not installed on this machine (evidence only)",
+      "packaging": "HoYo custom blocks; CAB map required",
+      "capture": [
+        "3dmigoto"
+      ],
+      "capture_notes": "ZZMI via XXMI Launcher; Frame Analysis dumps (not .rdc). RenderDoc route untested (anti-cheat).",
+      "source": [
+        "animestudio",
+        "assetripper",
+        "unitypy"
+      ],
+      "frame_extractors": [
+        "rf-ingest-3dmigoto"
+      ],
+      "verified": [
+        "3DMigoto Frame01 (user's, 1.9GB) ingested: 213 draws, 167 meshes, 83 textures decoded, 6 s",
+        "character body/hair/shoes rendered upright and textured in Unity and in UE (model space, unity->ue conversion exercised)",
+        "user's earlier UE reconstruction used AnimeStudio exports (verified-prior)"
+      ],
+      "gaps": [
+        "head/face parts missing: ZZZ draws characters via GPU-driven indirect draws whose arguments are not in the dump",
+        "world/camera placement needs ZZZ VS cbuffer decoding (not done)",
+        "skinning pose is whatever was dumped",
+        "AnimeStudio cannot be re-run: game not installed"
+      ],
+      "model_basis": [
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ]
+      ]
+    },
+    "genshin": {
+      "name": "Genshin Impact",
+      "engine": "unity",
+      "source_space": "unity",
+      "install": "not installed",
+      "packaging": "HoYo custom bundles / blk",
+      "capture": [
+        "3dmigoto"
+      ],
+      "source": [
+        "animestudio"
+      ],
+      "frame_extractors": [
+        "rf-ingest-3dmigoto"
+      ],
+      "verified": [],
+      "gaps": [
+        "no local install or captures: everything here is untested",
+        "ingest should work if layouts match (same 3DMigoto format); unverified"
+      ]
+    },
+    "hsr": {
+      "name": "Honkai: Star Rail",
+      "engine": "unity",
+      "source_space": "unity",
+      "install": "not installed",
+      "packaging": "HoYo custom bundles",
+      "capture": [
+        "3dmigoto"
+      ],
+      "source": [
+        "animestudio"
+      ],
+      "frame_extractors": [
+        "rf-ingest-3dmigoto"
+      ],
+      "verified": [],
+      "gaps": [
+        "no local install or captures: untested"
+      ]
+    },
+    "endfield": {
+      "name": "Arknights: Endfield",
+      "engine": "unity",
+      "engine_version": "Unity 2021.3.34f5 IL2CPP (read from globalgamemanagers)",
+      "source_space": "unity",
+      "install": "D:\\Hypergryph Launcher\\games\\Arknights Endfield",
+      "packaging": "encrypted VFS (.blc index + 1058 .chk chunks, base64-encrypted index_main.json)",
+      "capture": [
+        "renderdoc"
+      ],
+      "capture_notes": "AntiCheatExpert present; injecting into an online game risks account action - not attempted.",
+      "source": [
+        "unitypy",
+        "il2cppdumper"
+      ],
+      "frame_extractors": [
+        "rf-extract"
+      ],
+      "verified": [
+        "UnityPy opens globalgamemanagers (real file) and reports the Unity version"
+      ],
+      "gaps": [
+        "asset containers unreadable without game-specific decryption (no generic tool handles them)",
+        "capture route untested",
+        "this is the clearest example of a game that needs its own source adapter"
+      ]
+    },
+    "generic-unity": {
+      "name": "Unity game with standard UnityFS bundles / data files",
+      "engine": "unity",
+      "source_space": "unity",
+      "capture": [
+        "renderdoc",
+        "3dmigoto"
+      ],
+      "source": [
+        "unitypy",
+        "assetripper",
+        "assetstudio-razviar"
+      ],
+      "frame_extractors": [
+        "rf-extract",
+        "rf-ingest-3dmigoto"
+      ],
+      "verified": [
+        "UnityPy + AssetRipper read a Unity 6 AssetBundle built here (synthetic)",
+        "Unity-source route: bundle -> Scene Package -> Unity + UE, hierarchy transforms match Unity ground truth to 1.6e-7"
+      ],
+      "gaps": [
+        "no commercial game with plain bundles was available locally"
+      ]
+    },
+    "generic-unreal": {
+      "name": "Unreal game with pak / IoStore",
+      "engine": "unreal",
+      "source_space": "ue",
+      "capture": [
+        "renderdoc"
+      ],
+      "source": [
+        "cue4parse",
+        "fmodel"
+      ],
+      "frame_extractors": [
+        "rf-extract"
+      ],
+      "verified": [
+        "WuWa path above"
+      ],
+      "gaps": [
+        "each game needs EGame version, AES key and sometimes usmap"
+      ]
+    }
+  }
+}

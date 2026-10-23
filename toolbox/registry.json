@@ -1,0 +1,763 @@
+{
+  "_comment": "RenderForge tool registry. 'status' vocabulary: verified-here (I ran it on real data in this workspace) | verified-synthetic (ran on data I generated) | verified-prior (the user's earlier projects show it working; evidence path given, not re-run) | installed (present locally, not exercised) | candidate (not installed, plausible) | reference (read-only reference) | rejected. GitHub license/last-push/release are merged from github_meta.json via 'repo'.",
+  "layers": {
+    "capture": "L0 Acquire GPU / frame data from a running game",
+    "ingest": "L1 Turn a capture into the neutral Extract Package",
+    "source": "L2 Read the game's own asset files (pak / bundle / VFS)",
+    "match": "L3 Reconcile captured data with source assets",
+    "scene": "L4 Neutral Scene Package (interchange format)",
+    "emit": "L5 Write scene into a target engine / DCC",
+    "control": "L6 Drive the target editor interactively (MCP / scripting)",
+    "validate": "L7 Render and compare against the reference frame",
+    "orchestrate": "L8 Registry, game profiles, recipes, planner, skills"
+  },
+  "tools": [
+    {
+      "id": "renderdoc",
+      "name": "RenderDoc",
+      "layer": "capture",
+      "kind": "general-capture",
+      "repo": "baldurk/renderdoc",
+      "url": "https://github.com/baldurk/renderdoc",
+      "interfaces": [
+        "gui",
+        "cli (renderdoccmd)",
+        "python-api (embedded 3.6; headless via qrenderdoc --python)"
+      ],
+      "apis": [
+        "D3D11",
+        "D3D12",
+        "Vulkan",
+        "OpenGL"
+      ],
+      "engines": [
+        "any"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "workspace/wuwa_bridge (2.0GB D3D11 capture -> 19k instances)",
+        "renderforge/rd_scripts/rf_extract.py"
+      ],
+      "local": {
+        "detect": "C:\\Program Files\\RenderDoc\\renderdoccmd.exe",
+        "version_cmd": [
+          "{path}",
+          "version"
+        ]
+      },
+      "notes": "Installed 1.45; upstream is at v1.46. Python API is the batch extraction workhorse. Cannot capture titles whose anti-cheat blocks DLL injection (commonly reported for HoYo titles; not tested here) - use the 3DMigoto route for those.",
+      "risks": [
+        "anti-cheat blocks injection in many online games",
+        "1.45 vs mcp-bundled 1.43 runtime mismatch only matters for the MCP"
+      ]
+    },
+    {
+      "id": "renderdoc-mcp",
+      "name": "RenderDoc MCP (JiaboLi)",
+      "layer": "capture",
+      "kind": "gpu-analysis-mcp",
+      "repo": "JiaboLi-GitHub/renderdoc-mcp",
+      "url": "https://github.com/JiaboLi-GitHub/renderdoc-mcp",
+      "interfaces": [
+        "mcp-stdio (59 tools)",
+        "cli (renderdoc-cli)"
+      ],
+      "apis": [
+        "D3D11",
+        "D3D12",
+        "Vulkan",
+        "OpenGL"
+      ],
+      "engines": [
+        "any"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "tools/renderdoc-mcp (v0.3.0 binaries): opened 590MB capture, list_draws=166, get_pipeline_state",
+        ".mcp.json"
+      ],
+      "local": {
+        "detect": "tools/renderdoc-mcp/bin/renderdoc-mcp.exe"
+      },
+      "notes": "Best for interactive Q&A about a frame. v0.3.1 has no Windows binary release (source only, needs build against RenderDoc source); v0.3.0 binary bundles RenderDoc 1.43. Bulk extraction is faster/more complete via our own rd_extract script (vertex SRVs, instancing, cbuffers).",
+      "risks": [
+        "read-oriented: no bulk scene export",
+        "bundled RenderDoc runtime older than installed"
+      ]
+    },
+    {
+      "id": "renderdoc-contrib",
+      "name": "RenderDoc contrib extensions",
+      "layer": "capture",
+      "kind": "reference",
+      "repo": "baldurk/renderdoc-contrib",
+      "url": "https://github.com/baldurk/renderdoc-contrib",
+      "interfaces": [
+        "python extensions"
+      ],
+      "engines": [
+        "any"
+      ],
+      "status": "reference",
+      "integration": "reference-only",
+      "notes": "Community UI extensions; useful as examples of the extension API. Not needed for headless extraction."
+    },
+    {
+      "id": "nsight-graphics",
+      "name": "NVIDIA Nsight Graphics",
+      "layer": "capture",
+      "kind": "general-capture",
+      "url": "https://developer.nvidia.com/nsight-graphics",
+      "license_text": "proprietary freeware",
+      "interfaces": [
+        "gui",
+        "cli (vendor-documented; not verified)"
+      ],
+      "apis": [
+        "D3D11",
+        "D3D12",
+        "Vulkan",
+        "OpenGL"
+      ],
+      "engines": [
+        "any"
+      ],
+      "status": "candidate",
+      "integration": "manual-gui",
+      "local": {
+        "detect": "C:\\Program Files\\NVIDIA Corporation\\Nsight Graphics*"
+      },
+      "notes": "Fallback when RenderDoc cannot capture (e.g. DX12 + ray tracing). No known scripted resource export comparable to RenderDoc's Python API, so treat as visual/shader debugging, not as an extraction source."
+    },
+    {
+      "id": "pix",
+      "name": "PIX on Windows",
+      "layer": "capture",
+      "kind": "general-capture",
+      "url": "https://devblogs.microsoft.com/pix/introduction/",
+      "license_text": "proprietary freeware",
+      "interfaces": [
+        "gui",
+        "pixtool cli (not verified)"
+      ],
+      "apis": [
+        "D3D12"
+      ],
+      "engines": [
+        "any"
+      ],
+      "status": "candidate",
+      "integration": "manual-gui",
+      "local": {
+        "detect": "C:\\Program Files\\Microsoft PIX"
+      },
+      "notes": "D3D12-only fallback for titles RenderDoc mishandles. Same caveat as Nsight: export automation unverified."
+    },
+    {
+      "id": "3dmigoto",
+      "name": "3DMigoto (Frame Analysis)",
+      "layer": "capture",
+      "kind": "game-capture",
+      "repo": "bo3b/3Dmigoto",
+      "url": "https://github.com/bo3b/3Dmigoto",
+      "interfaces": [
+        "d3d11.dll proxy + ini",
+        "frame analysis dump (log.txt + .buf/.txt/.dds per draw)"
+      ],
+      "apis": [
+        "D3D11"
+      ],
+      "engines": [
+        "any D3D11 (used for Unity/UE anime games)"
+      ],
+      "status": "verified-prior",
+      "integration": "adapter",
+      "evidence": [
+        "D:\\HOU\\zzz_reverse\\evidence\\zzmi\\Frame01 (1.9GB dump)",
+        "workspace/zzz_frame01 (ingested here)"
+      ],
+      "notes": "Capture mechanism behind GIMI/SRMI/ZZMI/WWMI. A Frame Analysis dump contains PRE-vertex-shader buffers (no post-VS clip positions) so the generic transform solver does not apply; ingest emits model-space meshes and needs a per-game placement hook.",
+      "risks": [
+        "D3D11 only",
+        "licence not asserted by GitHub API - check before redistributing",
+        "injection may violate a game's ToS"
+      ]
+    },
+    {
+      "id": "xxmi-launcher",
+      "name": "XXMI Launcher",
+      "layer": "capture",
+      "kind": "game-capture",
+      "repo": "SpectrumQT/XXMI-Launcher",
+      "url": "https://github.com/SpectrumQT/XXMI-Launcher",
+      "interfaces": [
+        "gui launcher"
+      ],
+      "engines": [
+        "Unity/UE anime games it supports (Genshin, HSR, ZZZ, WuWa, ... see its README)"
+      ],
+      "status": "verified-prior",
+      "integration": "manual-gui",
+      "evidence": [
+        "D:\\HOU\\zzz_reverse\\tools\\xxmi (XXMI 2.2.1 + ZZMI 1.5.0 used for the 3 ZZZ frames)",
+        "D:\\HOU\\zzz_reverse\\derived\\zzz-capture-unpack-toolkit"
+      ],
+      "local": {
+        "detect": "D:\\HOU\\zzz_reverse\\tools\\xxmi"
+      },
+      "notes": "Per-game 3DMigoto packages + injection management. Upstream is far ahead (2.4.9). Capture procedure (Hunting, F8 per frame) is written in the user's toolkit README. Capture tool, not an extractor and not a mod tool by itself."
+    },
+    {
+      "id": "wwmi-tools",
+      "name": "WWMI-Tools (Blender add-on)",
+      "layer": "ingest",
+      "kind": "game-frame-extractor",
+      "repo": "SpectrumQT/WWMI-Tools",
+      "url": "https://github.com/SpectrumQT/WWMI-Tools",
+      "interfaces": [
+        "blender add-on"
+      ],
+      "engines": [
+        "UE (Wuthering Waves only)"
+      ],
+      "status": "candidate",
+      "integration": "adapter",
+      "notes": "Game-specific: reads WuWa frame dumps into Blender with Kuro's buffer layouts (also does mod export). Use its layout knowledge/ output as an alternative WuWa ingest; do NOT treat as generic. Blender is installed locally (D:\\Blender) but this add-on was not run."
+    },
+    {
+      "id": "gi-model-importer",
+      "name": "GIMI / SRMI (Genshin / HSR model importers)",
+      "layer": "capture",
+      "kind": "mod-tool",
+      "repo": "SilentNightSound/GI-Model-Importer",
+      "url": "https://github.com/SilentNightSound/GI-Model-Importer",
+      "interfaces": [
+        "3dmigoto package + ini"
+      ],
+      "engines": [
+        "Unity (Genshin / HSR)"
+      ],
+      "status": "reference",
+      "integration": "reference-only",
+      "notes": "MOD tools: they replace assets at runtime. Not an extraction pipeline. Value for us: documented per-game buffer/shader conventions and 3DMigoto config. SR-Model-Importer is stale (2023) and superseded by XXMI's SRMI package."
+    },
+    {
+      "id": "3dmigoto-guide",
+      "name": "3DMigoto usage guide (t1ktak)",
+      "layer": "capture",
+      "kind": "reference",
+      "url": "https://github.com/t1ktak/3dmigoto/blob/main/Guides/UsageInstructions.md",
+      "status": "reference",
+      "integration": "reference-only",
+      "notes": "Documentation for the frame-analysis workflow."
+    },
+    {
+      "id": "unitypy",
+      "name": "UnityPy",
+      "layer": "source",
+      "kind": "unity-parser",
+      "repo": "K0lb3/UnityPy",
+      "pypi": "UnityPy",
+      "url": "https://github.com/K0lb3/UnityPy",
+      "interfaces": [
+        "python library"
+      ],
+      "engines": [
+        "Unity"
+      ],
+      "formats": [
+        "AssetBundle (UnityFS)",
+        "serialized files",
+        "Texture2D/Mesh/Sprite/AudioClip/TextAsset"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "scripts/verify_unitypy.py on a Unity 6 AssetBundle (Texture2D->PNG, Mesh->OBJ, Transform read)",
+        "Endfield globalgamemanagers -> Unity 2021.3.34f5 (real game file)"
+      ],
+      "notes": "First choice for scripted reading of standard Unity data. Game-specific encryption (custom bundle headers / VFS) must be undone before it can open the data.",
+      "risks": [
+        "no help with encrypted game containers",
+        "IL2CPP MonoBehaviours need type info (see il2cppdumper)"
+      ]
+    },
+    {
+      "id": "assetripper",
+      "name": "AssetRipper",
+      "layer": "source",
+      "kind": "unity-parser",
+      "repo": "AssetRipper/AssetRipper",
+      "url": "https://github.com/AssetRipper/AssetRipper",
+      "interfaces": [
+        "local web UI",
+        "headless HTTP API (--headless --port; POST /LoadFile, /Export/UnityProject)"
+      ],
+      "engines": [
+        "Unity"
+      ],
+      "status": "verified-synthetic",
+      "integration": "wrapped",
+      "evidence": [
+        "tools/AssetRipper/2.0.0; exported bundle -> Unity project with prefab/mesh/material/png (workspace/verify_unity/assetripper)"
+      ],
+      "local": {
+        "detect": "tools/AssetRipper/2.0.0/AssetRipper.GUI.Free.exe"
+      },
+      "notes": "Reconstructs a whole Unity project (prefabs, scenes, materials) - best for scene-level recovery when data is readable. GPL-3.0: run it as a separate process (as done here), do not link.",
+      "risks": [
+        "GPL-3.0",
+        "same encrypted-container limitation as UnityPy"
+      ]
+    },
+    {
+      "id": "assetstudio-razviar",
+      "name": "AssetStudio (Razviar update branch)",
+      "layer": "source",
+      "kind": "unity-parser",
+      "repo": "Razviar/assetstudio",
+      "url": "https://github.com/Razviar/assetstudio",
+      "interfaces": [
+        "gui",
+        "cli"
+      ],
+      "engines": [
+        "Unity"
+      ],
+      "status": "candidate",
+      "integration": "wrapped",
+      "notes": "Maintained successor of Perfare/AssetStudio (archived 2022). CLI export of meshes/FBX/textures. Not run; UnityPy + AssetRipper cover the same ground for now."
+    },
+    {
+      "id": "animestudio",
+      "name": "AnimeStudio (ZZZStudio family)",
+      "layer": "source",
+      "kind": "unity-game-parser",
+      "repo": "Escartem/AnimeStudio",
+      "url": "https://github.com/Escartem/AnimeStudio",
+      "interfaces": [
+        "gui",
+        "cli"
+      ],
+      "engines": [
+        "Unity (HoYo titles: Genshin / HSR / ZZZ ...)"
+      ],
+      "formats": [
+        "HoYo custom blocks with CAB map"
+      ],
+      "status": "verified-prior",
+      "integration": "adapter",
+      "evidence": [
+        "D:\\HOU\\zzz_reverse\\derived\\zzz-capture-unpack-toolkit\\...\\unpack\\AnimeStudio (ZZZ 3.2.0)",
+        "D:\\HOU\\zzz_reverse\\source-assets (FBX/EXR/animation exported from the installed game)"
+      ],
+      "local": {
+        "detect": "D:\\HOU\\zzz_reverse\\tools\\zzzstudio"
+      },
+      "notes": "NOT in the original candidate list but required: HoYo games use custom block formats that generic Unity tools cannot read. This is the model for a per-game 'source adapter'. ZZZ itself is not installed on this machine now, so it was not re-run.",
+      "risks": [
+        "needs the matching installed game version + CAB map",
+        "version-fragile after each game patch"
+      ]
+    },
+    {
+      "id": "uabea",
+      "name": "UABEA (Unity Asset Bundle Extractor Avalonia)",
+      "layer": "source",
+      "kind": "unity-editor",
+      "repo": "nesrak1/UABEA",
+      "url": "https://github.com/nesrak1/UABEA",
+      "interfaces": [
+        "gui"
+      ],
+      "engines": [
+        "Unity"
+      ],
+      "status": "candidate",
+      "integration": "manual-gui",
+      "notes": "Bundle inspection/patching GUI. Cannot be scripted; keep as the human fallback for odd bundles."
+    },
+    {
+      "id": "il2cppdumper",
+      "name": "Il2CppDumper / Il2CppInspectorRedux",
+      "layer": "source",
+      "kind": "il2cpp-metadata",
+      "repo": "Perfare/Il2CppDumper",
+      "url": "https://github.com/Perfare/Il2CppDumper",
+      "interfaces": [
+        "cli"
+      ],
+      "engines": [
+        "Unity IL2CPP"
+      ],
+      "status": "candidate",
+      "integration": "wrapped",
+      "notes": "Recovers type/field layouts from global-metadata.dat + GameAssembly.dll so MonoBehaviour data (scene settings, custom components) can be decoded. Il2CppDumper is stale (2024); LukeFZ/Il2CppInspectorRedux (AGPL-3.0, 2026) is the maintained alternative. Needed for Endfield-class games; not run."
+    },
+    {
+      "id": "cue4parse",
+      "name": "CUE4Parse",
+      "layer": "source",
+      "kind": "unreal-parser",
+      "repo": "FabianFG/CUE4Parse",
+      "nuget": "CUE4Parse, CUE4Parse-Conversion",
+      "url": "https://github.com/FabianFG/CUE4Parse",
+      "interfaces": [
+        ".NET library (net8/10)"
+      ],
+      "engines": [
+        "Unreal (UE3-UE5; per-game EGame versions)"
+      ],
+      "formats": [
+        "pak",
+        "IoStore (utoc/ucas)",
+        "uasset/umap",
+        "glTF/PSK/UEFormat export"
+      ],
+      "status": "verified-prior",
+      "integration": "wrapped",
+      "evidence": [
+        "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe (SourceProbe CLI on CUE4Parse 1.2.2.202609; WuWa 2.1M files indexed, meshes -> GLB, FastGeo layouts)",
+        "re-run here: SourceProbe selftest; 892 LOD fingerprints matched 53 captured meshes bit-exact"
+      ],
+      "local": {
+        "detect": "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe\\bin\\Release\\net10.0\\SourceProbe.dll"
+      },
+      "notes": "The right batch tool for Unreal source assets. Needs the game's AES key (user's SourceProbe reads it from an existing local file; RenderForge never stores or prints keys) and sometimes .usmap mappings.",
+      "risks": [
+        "per-game engine version / AES key / mappings",
+        "FastGeo and other UE5 world-partition formats need dedicated handling (user's `layout` command)"
+      ]
+    },
+    {
+      "id": "fmodel",
+      "name": "FModel",
+      "layer": "source",
+      "kind": "unreal-browser",
+      "repo": "4sval/FModel",
+      "url": "https://github.com/4sval/FModel",
+      "interfaces": [
+        "gui (WPF)"
+      ],
+      "engines": [
+        "Unreal"
+      ],
+      "status": "installed",
+      "integration": "manual-gui",
+      "local": {
+        "detect": "D:\\FModel\\FModel.exe"
+      },
+      "notes": "Interactive browser/exporter built on CUE4Parse. Use to explore a game by hand and to learn paths/keys; do batch work through CUE4Parse directly. GPL-3.0 - separate process only."
+    },
+    {
+      "id": "ue-python",
+      "name": "UE Python Editor Scripting",
+      "layer": "emit",
+      "kind": "engine-scripting",
+      "url": "https://dev.epicgames.com/documentation/en-us/unreal-engine/scripting-the-unreal-editor-using-python",
+      "interfaces": [
+        "python 3.11 inside editor",
+        "UnrealEditor-Cmd -ExecutePythonScript",
+        "UnrealEditor -ExecCmds=py"
+      ],
+      "engines": [
+        "Unreal 5.8"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "renderforge/ue_scripts/import_scene.py: 523 meshes / 19k instances / 197 materials in ~45 s headless"
+      ],
+      "notes": "See CLAUDE.md for the verified pitfalls (StaticMesh creation, ISM via Blueprint, no normal setter, game-mode screenshots)."
+    },
+    {
+      "id": "ue-interchange",
+      "name": "UE Interchange",
+      "layer": "emit",
+      "kind": "engine-import",
+      "url": "https://dev.epicgames.com/documentation/unreal-engine/interchange-framework-in-unreal-engine",
+      "interfaces": [
+        "AssetImportTask / import pipelines (fbx, gltf, usd, ...)"
+      ],
+      "engines": [
+        "Unreal 5.8"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "270 PNG textures imported through it (LogInterchangeEngine) in headless runs"
+      ],
+      "notes": "Textures verified. Mesh import from glTF/FBX (e.g. CUE4Parse GLB output) not yet exercised: current emitter builds StaticMeshes directly from raw arrays, which avoids FBX/glTF round trips but loses nothing we need yet."
+    },
+    {
+      "id": "ue-official-mcp",
+      "name": "Unreal MCP (official, UE 5.8)",
+      "layer": "control",
+      "kind": "engine-mcp",
+      "url": "https://dev.epicgames.com/documentation/unreal-engine/unreal-mcp-in-unreal-editor?application_version=5.8",
+      "interfaces": [
+        "streamable-http MCP at http://localhost:8000/mcp (needs Mcp-Session-Id)",
+        "list_toolsets / describe_toolset / call_tool"
+      ],
+      "engines": [
+        "Unreal 5.8"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "renderforge/httpmcp.py: enumerated ~15 editor toolsets (actor, asset, material, scene, blueprint ...), loaded the reconstructed level, find_actors returned RF_ actors"
+      ],
+      "local": {
+        "detect": "D:\\UE\\UE_5.8\\Engine\\Plugins\\Experimental\\ModelContextProtocol"
+      },
+      "notes": "Enable plugins ModelContextProtocol + ToolsetRegistry + EditorToolset and set bAutoStartServer in DefaultEditorPerProjectUserSettings.ini (done in ue_project). Experimental / NoRedist plugin. Gives a chat-driven way to inspect and edit the reconstructed level."
+    },
+    {
+      "id": "funplay-unreal-mcp",
+      "name": "funplay-unreal-mcp",
+      "layer": "control",
+      "kind": "engine-mcp",
+      "repo": "FunplayAI/funplay-unreal-mcp",
+      "url": "https://github.com/FunplayAI/funplay-unreal-mcp",
+      "interfaces": [
+        "mcp (python exec, screenshots, PIE)"
+      ],
+      "engines": [
+        "Unreal"
+      ],
+      "status": "candidate",
+      "integration": "direct",
+      "notes": "Alternative to the official MCP (execute_python, PIE automation). Not installed: the official server already covers editing, and headless python covers batch import. Revisit if the official toolsets lack screenshot / PIE control."
+    },
+    {
+      "id": "funplay-unity-mcp",
+      "name": "funplay-unity-mcp",
+      "layer": "control",
+      "kind": "engine-mcp",
+      "repo": "FunplayAI/funplay-unity-mcp",
+      "url": "https://github.com/FunplayAI/funplay-unity-mcp",
+      "interfaces": [
+        "mcp"
+      ],
+      "engines": [
+        "Unity"
+      ],
+      "status": "candidate",
+      "integration": "direct",
+      "notes": "Chat-driven Unity editing. Not installed. The user's environment already exposes a Unity CLI / MCP ('unity' server) and Unity.exe batchmode is verified here."
+    },
+    {
+      "id": "unity-batchmode",
+      "name": "Unity Editor batchmode + Unity CLI",
+      "layer": "emit",
+      "kind": "engine-scripting",
+      "interfaces": [
+        "Unity.exe -batchmode -executeMethod",
+        "unity CLI (AppData\\Local\\Unity\\bin)"
+      ],
+      "engines": [
+        "Unity 6000.0.83f1 installed"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "renderforge/unity_run.py + unity_project/RenderForgeUnity/Assets/Editor/RFImportScene.cs: 523 meshes / 19k instances / textured scene + camera render PNG"
+      ],
+      "local": {
+        "detect": "D:\\Unity\\60000.0.83f1\\Editor\\Unity.exe"
+      },
+      "notes": "First run of a fresh project only imports; run the method twice (or open once) so scripts compile."
+    },
+    {
+      "id": "rdc2ue",
+      "name": "RDC2UE",
+      "layer": "emit",
+      "kind": "reference-implementation",
+      "repo": "GuoRen0830/RDC2UE",
+      "url": "https://github.com/GuoRen0830/RDC2UE",
+      "interfaces": [
+        "RenderDoc extension + UE plugin"
+      ],
+      "engines": [
+        "Unreal (Delta Force only, per README)"
+      ],
+      "status": "reference",
+      "integration": "reference-only",
+      "evidence": [
+        "refs/RDC2UE (cloned)"
+      ],
+      "notes": "No licence file: do not copy code. Useful ideas: manual ViewProj entry as fallback when auto-detect fails; shader transcription via DXBC decompiler + spirv-cross for material recovery. Game-specific by its own statement."
+    },
+    {
+      "id": "ue5-renderdoc-to-obj",
+      "name": "UE5_RenderDoc_To_OBJ",
+      "layer": "emit",
+      "kind": "reference-implementation",
+      "repo": "PowerSerg10/UE5_RenderDoc_To_OBJ",
+      "url": "https://github.com/PowerSerg10/UE5_RenderDoc_To_OBJ",
+      "interfaces": [
+        "python scripts"
+      ],
+      "engines": [
+        "Unreal 5"
+      ],
+      "status": "reference",
+      "integration": "reference-only",
+      "notes": "CSV mesh export -> OBJ with UE5 view-buffer reconstruction. No licence file. Our solver (fit local->clip, pick VP from cbuffers) covers the same ground generically."
+    },
+    {
+      "id": "rf-extract",
+      "name": "RenderForge rd_extract (RenderDoc -> Extract Package)",
+      "layer": "ingest",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "python -m renderforge survey|export"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "workspace/wuwa_bridge/export (681 draws)"
+      ],
+      "notes": "D3D11 verified; D3D12/Vulkan code paths use the same API but are unverified."
+    },
+    {
+      "id": "rf-ingest-3dmigoto",
+      "name": "RenderForge 3DMigoto Frame Analysis ingest",
+      "layer": "ingest",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "renderforge.ingest_3dmigoto.ingest"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "ZZZ Frame01: 229 DrawIndexed + 61 indirect parsed -> 213 draws / 167 meshes / 83 textures in 6 s",
+        "docs/milestone_zzz_3dmigoto_unity.png (Unity), UE render also produced",
+        "workspace/zzz_frame01"
+      ],
+      "notes": "Parses log.txt + per-draw .buf/.txt/.dds. GPU-driven DrawIndexedInstancedIndirect (ZZZ characters) has GPU-written args that are not in the dump: resolving them from CPU-side update dumps was tried and shreds meshes, so the whole dumped index buffer is used (head/face parts of the ZZZ test character come out missing/merged). Known limitation, root cause identified."
+    },
+    {
+      "id": "rf-solve-build",
+      "name": "RenderForge solver / scene builder",
+      "layer": "scene",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "renderforge.build.build / build_model_space"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "VP found in 97% of static draws; camera matches reference in UE and Unity"
+      ],
+      "notes": "Requires post-VS data (RenderDoc). 3DMigoto path uses build_model_space (identity placement + optional basis)."
+    },
+    {
+      "id": "rf-match",
+      "name": "RenderForge asset matcher",
+      "layer": "match",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "renderforge.match"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "workspace/wuwa_bridge/asset_match.json: 53/522 captured meshes identified bit-exact (error 0.0) with source name + LOD"
+      ],
+      "notes": "Coverage is bounded by how many source meshes have been fingerprinted (892 LODs / 282 packages from the user's probes). Next: bulk fingerprint index."
+    },
+    {
+      "id": "rf-emit-ue",
+      "name": "RenderForge UE emitter (import_scene.py)",
+      "layer": "emit",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "python -m renderforge ue-import"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "workspace/wuwa_bridge/shots/compare.png"
+      ],
+      "notes": "Accepts scene packages from any source space: converts Unity-space packages to UE space first (renderforge/space.py; vertex round-trip error <1e-6 on a synthetic hierarchy)."
+    },
+    {
+      "id": "rf-emit-unity",
+      "name": "RenderForge Unity emitter (emit_unity.py + RFImportScene.cs)",
+      "layer": "emit",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "python -m renderforge unity-import"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "docs/milestone_unity_target_wuwa_bridge.png"
+      ]
+    },
+    {
+      "id": "rf-shot",
+      "name": "RenderForge screenshot / compare harness",
+      "layer": "validate",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "python -m renderforge shot|compare"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "notes": "UE: game-mode HighResShot off-screen. Unity: camera render in the import method. Comparison is side-by-side, not a pixel metric yet."
+    },
+    {
+      "id": "user-sourceprobe",
+      "name": "SourceProbe (user's CUE4Parse CLI)",
+      "layer": "source",
+      "kind": "local-adapter",
+      "interfaces": [
+        "dotnet SourceProbe.dll: index|query|inspect|layout|mesh|mesh-all|fingerprint|world|volume-texture"
+      ],
+      "engines": [
+        "Unreal (Wuthering Waves)"
+      ],
+      "status": "verified-prior",
+      "integration": "adapter",
+      "local": {
+        "detect": "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe\\bin\\Release\\net10.0\\SourceProbe.dll"
+      },
+      "notes": "Owned by the user's WuWa project; referenced by path, not copied. Writes only under that project's 03_source_assets / 99_scratch."
+    },
+    {
+      "id": "rf-ingest-unity",
+      "name": "RenderForge Unity-source ingest (UnityPy -> Scene Package)",
+      "layer": "ingest",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "python -m renderforge ingest-unity <case> --bundle <file>"
+      ],
+      "status": "verified-synthetic",
+      "integration": "direct",
+      "evidence": [
+        "unity_project/RenderForgeUnity/Bundles/rftest: Transform hierarchy world matrices match Unity's own localToWorldMatrix to 1.6e-7; asymmetric wedge mesh vertices exact; textured scene rendered in Unity and imported into UE"
+      ],
+      "notes": "Source-only route: no GPU capture involved. Handles Transform hierarchy, MeshFilter+MeshRenderer, Mesh (raw arrays via UnityPy MeshHandler), Material main/bump textures. Not yet exercised on a commercial game (none with readable bundles available locally); skinned meshes, LODGroups, prefab variants and scene files are not handled."
+    },
+    {
+      "id": "rf-space",
+      "name": "RenderForge space converter (ue <-> unity)",
+      "layer": "scene",
+      "kind": "renderforge-core",
+      "interfaces": [
+        "renderforge.space.convert_scene"
+      ],
+      "status": "verified-here",
+      "integration": "direct",
+      "evidence": [
+        "numeric check: world-space vertices identical after unity->ue conversion (8.6e-7 cm)",
+        "same RenderDoc scene rendered with correct camera in both engines"
+      ],
+      "notes": "Handles axis permutation + unit scale, instance matrices, normals, camera. Winding is preserved (both are left-handed). UV V-flip is done by the Unity emitter only."
+    }
+  ]
+}

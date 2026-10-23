@@ -1,0 +1,228 @@
+{
+  "_comment": "Recipes: the executable workflows. Each step names the tool ids that can perform it. The planner picks a recipe from (capture type available, source availability, target engine).",
+  "recipes": {
+    "R1-rdc-to-scene": {
+      "title": "RenderDoc capture -> Scene Package -> target engine",
+      "needs": [
+        "capture:rdc"
+      ],
+      "targets": [
+        "unreal",
+        "unity"
+      ],
+      "steps": [
+        {
+          "do": "survey draws and pick the scene pass",
+          "tools": [
+            "rf-extract"
+          ],
+          "cmd": "python -m renderforge survey <case> --rdc <file.rdc>"
+        },
+        {
+          "do": "export meshes / textures / cbuffers / VS SRVs",
+          "tools": [
+            "rf-extract"
+          ],
+          "cmd": "python -m renderforge export <case>"
+        },
+        {
+          "do": "solve world matrices + camera",
+          "tools": [
+            "rf-solve-build"
+          ],
+          "cmd": "python -m renderforge build <case>"
+        },
+        {
+          "do": "(optional) identify source assets",
+          "tools": [
+            "rf-match",
+            "cue4parse",
+            "unitypy"
+          ],
+          "cmd": "python -m renderforge match <case> --fingerprints <dir>"
+        },
+        {
+          "do": "emit into engine",
+          "tools": [
+            "rf-emit-ue",
+            "rf-emit-unity"
+          ],
+          "cmd": "python -m renderforge ue-import|unity-import <case>"
+        },
+        {
+          "do": "render + compare",
+          "tools": [
+            "rf-shot"
+          ],
+          "cmd": "python -m renderforge shot|compare <case>"
+        }
+      ]
+    },
+    "R2-3dmigoto-to-scene": {
+      "title": "3DMigoto Frame Analysis dump -> model-space Scene Package -> target engine",
+      "needs": [
+        "capture:3dmigoto-frame-analysis"
+      ],
+      "targets": [
+        "unreal",
+        "unity"
+      ],
+      "steps": [
+        {
+          "do": "capture frames (user action in game)",
+          "tools": [
+            "xxmi-launcher",
+            "3dmigoto"
+          ],
+          "cmd": "manual: Hunting + F8 per frame"
+        },
+        {
+          "do": "ingest dump into Extract Package",
+          "tools": [
+            "rf-ingest-3dmigoto"
+          ],
+          "cmd": "python -m renderforge ingest-3dmigoto <case> --frame-dir <FrameAnalysis-...>"
+        },
+        {
+          "do": "build model-space scene (game profile supplies basis / filters)",
+          "tools": [
+            "rf-solve-build"
+          ],
+          "cmd": "python -m renderforge build-model <case> --game <id>"
+        },
+        {
+          "do": "emit into engine",
+          "tools": [
+            "rf-emit-ue",
+            "rf-emit-unity"
+          ],
+          "cmd": "python -m renderforge ue-import|unity-import <case>"
+        }
+      ],
+      "caveat": "No post-VS positions in a Frame Analysis dump: placement of world geometry needs a game adapter that decodes the VS constant buffers. Character / prop extraction in model space works generically."
+    },
+    "R3-unreal-source-assets": {
+      "title": "Unreal pak/IoStore -> source meshes/textures/world layout",
+      "needs": [
+        "source:unreal-pak"
+      ],
+      "targets": [
+        "unreal",
+        "unity"
+      ],
+      "steps": [
+        {
+          "do": "mount game, index files",
+          "tools": [
+            "user-sourceprobe",
+            "cue4parse"
+          ],
+          "cmd": "SourceProbe index|query"
+        },
+        {
+          "do": "export meshes with fingerprints",
+          "tools": [
+            "user-sourceprobe"
+          ],
+          "cmd": "SourceProbe mesh|fingerprint"
+        },
+        {
+          "do": "match against captured meshes",
+          "tools": [
+            "rf-match"
+          ],
+          "cmd": "python -m renderforge match <case> --fingerprints <dir>"
+        },
+        {
+          "do": "world/actor layout (instances without GPU capture)",
+          "tools": [
+            "user-sourceprobe"
+          ],
+          "cmd": "SourceProbe layout"
+        }
+      ]
+    },
+    "R4-unity-source-assets": {
+      "title": "Unity bundles/data files -> source meshes/textures/prefabs",
+      "needs": [
+        "source:unity-readable"
+      ],
+      "targets": [
+        "unreal",
+        "unity"
+      ],
+      "steps": [
+        {
+          "do": "if container is custom/encrypted: use the game's source adapter first",
+          "tools": [
+            "animestudio"
+          ],
+          "cmd": "game adapter (see games.json)"
+        },
+        {
+          "do": "scripted extraction of textures / meshes / transforms",
+          "tools": [
+            "unitypy"
+          ],
+          "cmd": "python scripts/verify_unitypy.py <bundle> <out>"
+        },
+        {
+          "do": "whole-project reconstruction (prefabs, materials, scenes)",
+          "tools": [
+            "assetripper"
+          ],
+          "cmd": "AssetRipper.GUI.Free --headless --port N; POST /LoadFile, /Export/UnityProject"
+        },
+        {
+          "do": "bundle -> Scene Package directly (no GPU capture)",
+          "tools": [
+            "rf-ingest-unity"
+          ],
+          "cmd": "python -m renderforge ingest-unity <case> --bundle <file>"
+        },
+        {
+          "do": "IL2CPP type info for MonoBehaviours",
+          "tools": [
+            "il2cppdumper"
+          ],
+          "cmd": "Il2CppDumper GameAssembly.dll global-metadata.dat"
+        },
+        {
+          "do": "emit into engine",
+          "tools": [
+            "rf-emit-ue",
+            "rf-emit-unity"
+          ],
+          "cmd": "python -m renderforge ue-import|unity-import <case>"
+        }
+      ]
+    },
+    "R5-chat-edit": {
+      "title": "Interactive editing of the result from Claude Code",
+      "needs": [
+        "engine:running-editor"
+      ],
+      "targets": [
+        "unreal",
+        "unity"
+      ],
+      "steps": [
+        {
+          "do": "Unreal: start editor with Unreal MCP enabled, talk to http://localhost:8000/mcp",
+          "tools": [
+            "ue-official-mcp"
+          ],
+          "cmd": "renderforge.httpmcp.HttpMcp"
+        },
+        {
+          "do": "Unity: unity CLI / MCP, or batchmode methods",
+          "tools": [
+            "unity-batchmode",
+            "funplay-unity-mcp"
+          ],
+          "cmd": "unity CLI"
+        }
+      ]
+    }
+  }
+}

@@ -45,4 +45,9 @@
 - UE 官方 MCP：启用 ModelContextProtocol+ToolsetRegistry+EditorToolset，`DefaultEditorPerProjectUserSettings.ini` 设 bAutoStartServer=True，HTTP `localhost:8000/mcp` 需要 Mcp-Session-Id（`renderforge/httpmcp.py`）；`call_tool` 参数是 `toolset_name`+`tool_name`+`arguments`。
 - Endfield（Unity 2021.3.34f5 IL2CPP）：资源在加密 VFS(.blc/.chk)；`globalgamemanagers` 是普通文件可读。
 
+- 透明 pass 在主 pass 之后单独写颜色 RT（如 31658 + 31689）；`rf_extract` 的 `save_rt_inputs` 强制保存这些 RT 作为贴图。`build --extra-export <dir> --extra-pass translucent` 把第二个 extract 合并进场景（mesh id 加 `x` 前缀，各自根目录）。
+- 无法用 local→clip 拟合的 billboard/粒子不要烘焙；`w` 正负混杂，除完是退化卡片。depth-only pass 与主 pass 是同一批植被代理，别合并。
+- UE 透明材质实例每次导入要删除重建（否则沿用旧父级）；无 alpha 的 BC1 粒子贴图改用亮度遮罩。
+- 水面：MI 链路（父级/混合模式/贴图）可在引擎内核实，但“截图里可见”必须单独验证。
+
 ## 已知限制 / 待办见 ROADMAP.md

@@ -618,9 +618,12 @@
    "status": "verified-here",
    "integration": "direct",
    "evidence": [
-    "workspace/wuwa_bridge/export (681 draws)"
+    "workspace/wuwa_bridge/export (681 opaque scene-pass draws)",
+    "workspace/wuwa_bridge/export_transparent4 (67 translucent-pass draws; writes_extra / ps view format recorded)",
+    "workspace/wuwa_bridge/export_depth (714 depth-only draws)",
+    "workspace/wuwa_61250/ids (2,302 draws, index list only, no geometry export)"
    ],
-   "notes": "D3D11 verified; D3D12/Vulkan code paths use the same API but are unverified."
+   "notes": "D3D11 verified; D3D12/Vulkan code paths use the same API but are unverified. Modes: survey | export | ids. export options: --no-instanced-index, save_rt_inputs (force-save render-target inputs as PNG, e.g. scene colour for a translucent pass), per-draw ownIndices when a mesh shares its index buffer."
   },
   {
    "id": "rf-ingest-3dmigoto",
@@ -650,9 +653,10 @@
    "status": "verified-here",
    "integration": "direct",
    "evidence": [
-    "VP found in 97% of static draws; camera matches reference in UE and Unity"
+    "VP found in 97% of static draws; camera matches reference in UE and Unity",
+    "workspace/wuwa_bridge/build: 73 translucent-pass instances placed with affine fits; water draw identified as SM_Old_Wat_08AH"
    ],
-   "notes": "Requires post-VS data (RenderDoc). 3DMigoto path uses build_model_space (identity placement + optional basis)."
+   "notes": "Requires post-VS data (RenderDoc). 3DMigoto path uses build_model_space (identity placement + optional basis). Extra pass merge (--extra-export/--extra-pass) adds a second extract with its own root; billboard/camera-facing quads are rejected (not rigid) rather than baked."
   },
   {
    "id": "rf-match",
@@ -686,7 +690,7 @@
    "evidence": [
     "workspace/wuwa_bridge/shots/compare.png"
    ],
-   "notes": "Accepts scene packages from any source space: converts Unity-space packages to UE space first (renderforge/space.py; vertex round-trip error <1e-6 on a synthetic hierarchy)."
+   "notes": "Accepts scene packages from any source space: converts Unity-space packages to UE space first (renderforge/space.py; vertex round-trip error <1e-6 on a synthetic hierarchy). Material kinds: opaque masked, translucent (alpha), translucent-luminance (BC1 sheets without alpha), water preview (translucent teal tint + captured normal). Near-camera translucent FX hidden by default."
   },
   {
    "id": "rf-emit-unity",

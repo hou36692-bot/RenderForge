@@ -223,8 +223,11 @@ def main():
     if JOB.get("eids"):
         want = set(JOB["eids"])
     elif JOB.get("range"):
-        lo, hi = JOB["range"]
+        lo, hi = JOB.get("range")[:2]
         want = set(a.eventId for a, _ in draws if lo <= a.eventId <= hi)
+    # A draw with no render targets still contributes when it is explicitly asked for (depth-only passes, or a
+    # caller that selected it by its depth attachment).
+    no_rt = set(JOB.get("no_rt_eids") or [])
     tex_dir = os.path.join(OUT, "textures")
     mesh_dir = os.path.join(OUT, "meshes")
     cb_dir = os.path.join(OUT, "cbuffers")
@@ -251,14 +254,18 @@ def main():
             pass
         return False
 
-    def save_texture(resid):
+    def save_texture(resid, force=False):
         key = rid(resid)
         if key in saved_tex:
-            return saved_tex[key]
+            rec = saved_tex[key]
+            if not force or (rec and rec.get("file")):
+                return rec
         t = texinfo.get(key)
         rec = None
         if t is not None:
-            dyn = is_dynamic(resid)
+            # `force` = the caller proved this is a content input of the pass being exported (render-target
+            # feedback); it is written even though it is also a target elsewhere in the frame.
+            dyn = is_dynamic(resid) and not force
             rec = {"id": key, "w": t.width, "h": t.height, "mips": t.mips, "format": fmt_name(t.format),
                    "cube": bool(t.cubemap), "arr": t.arraysize, "dynamic": dyn, "file": None}
             if not dyn and not t.cubemap and t.arraysize <= 1 and t.width * t.height <= JOB.get("max_tex_pixels", 8192 * 8192):
@@ -420,8 +427,14 @@ def main():
                 r_ = u.descriptor.resource
                 if r_ == rd.ResourceId.Null():
                     continue
-                texs.append({"slot": u.access.index, "res": rid(r_), "format": fmt_name(u.descriptor.format)})
+                texs.append({"slot": u.access.index, "res": rid(r_), "format": fmt_name(u.descriptor.format),
+                             "view": fmt_name(u.descriptor.format) if u.descriptor.format is not None else None})
                 save_texture(r_)
+            # render targets the pass samples are inputs too (read-back / refraction / distortion sources)
+            if JOB.get("save_rt_inputs"):
+                for o in a.outputs:
+                    if o != rd.ResourceId.Null():
+                        save_texture(o, force=True)
         except Exception:
             log("tex fail eid", a.eventId, traceback.format_exc())
         # vertex-shader buffer SRVs (manual vertex fetch: UVs / tangents often live here)
@@ -449,18 +462,20 @@ def main():
             log("srv fail eid", a.eventId, traceback.format_exc())
         outs = [o for o in a.outputs if o != rd.ResourceId.Null()]
         info = draws_of_mesh[mid]
+        rts = [rid(o) for o in outs]
         own = [i + basev - info["vmin"] for i in idx[a.indexOffset:a.indexOffset + a.numIndices]] if (
             a.numInstances == 0 and len(idx) > a.numIndices) else None
         return {"eid": a.eventId, "mesh": mid, "vsSrvs": srvs, "psDiscard": pixel_shader_discards(st), "name": a.GetName(sf), "path": path, "topology": topo,
                 "numInstances": a.numInstances, "postVS": post, "cbuffers": cbs, "textures": texs,
                 "vmin": info["vmin"], "nverts": info["nverts"], "ownIndices": own,
                 "vs": rid(st.GetShader(rd.ShaderStage.Vertex)), "ps": rid(st.GetShader(rd.ShaderStage.Pixel)),
-                "rts": [rid(o) for o in outs]}
+                # the first output is the scene colour; extra outputs mark which extra buffers a pass writes
+                "rts": rts, "writes_extra": [fmt_name(texinfo[r].format) for r in rts[1:] if r in texinfo]}
 
     n_ok = 0
     n_inst_sel = 0
     for a, path in draws:
-        if want is not None and a.eventId not in want:
+        if want is not None and a.eventId not in want and a.eventId not in no_rt:
             continue
         try:
             d = export_draw(a, path)

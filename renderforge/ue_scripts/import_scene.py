@@ -118,6 +118,91 @@ def make_master(name, with_base, with_normal, masked=False):
     return mat
 
 
+def make_translucent_master(name, opaque=False, alpha=True):
+    """Translucent master. `alpha` uses texture alpha as coverage; without it masks on luminance (BC1 particle
+    sheets have no alpha channel) so a soft dust card does not turn into an opaque disk."""
+    path = f"{ROOT}/Materials/{name}"
+    if eal.does_asset_exist(path):
+        return eal.load_asset(path)  # masters keep their definition across runs; new ones get new names
+    mat = tools.create_asset(name, f"{ROOT}/Materials", unreal.Material, unreal.MaterialFactoryNew())
+    mel = unreal.MaterialEditingLibrary
+    mat.set_editor_property("two_sided", True)
+    if alpha:
+        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    else:
+        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    if opaque:
+        mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 0)
+    tb.set_editor_property("parameter_name", "BaseColor")
+    tb.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    mel.connect_material_property(tb, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+    if alpha:
+        # particle / water-line textures carry coverage in alpha; without it the quads render as solid rectangles
+        mel.connect_material_property(tb, "A", unreal.MaterialProperty.MP_OPACITY)
+    else:
+        # mean(RGB): the sheet is white-on-black, so luminance is the coverage mask
+        lum = mel.create_material_expression(mat, unreal.MaterialExpressionDotProduct, -300, 200)
+        mel.connect_material_expressions(tb, "RGB", lum, "A")
+        third = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -500, 200)
+        third.set_editor_property("constant", unreal.LinearColor(0.3333, 0.3333, 0.3333, 1.0))
+        mel.connect_material_expressions(third, "", lum, "B")
+        # soft sheets are shown as a mask at a low threshold, not as opaque cards
+        boost = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -150, 200)
+        mel.connect_material_expressions(lum, "", boost, "A")
+        k = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -300, 300)
+        k.set_editor_property("r", 2.0)
+        mel.connect_material_expressions(k, "", boost, "B")
+        mel.connect_material_property(boost, "", unreal.MaterialProperty.MP_OPACITY_MASK)
+    tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 300)
+    tn.set_editor_property("parameter_name", "Normal")
+    tn.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"))
+    tn.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+    mel.connect_material_property(tn, "RGB", unreal.MaterialProperty.MP_NORMAL)
+    mel.recompile_material(mat)
+    eal.save_loaded_asset(mat)
+    return mat
+
+
+def make_water_master(name):
+    """Single-layer water preview: translucent teal base multiplied by the water texture.
+
+    The game's water shader (two-layer ripple normals, refraction, absorption, caustics) is not reconstructed;
+    this is the minimum that reads as water instead of an opaque grey plane. Normals use the captured map at
+    mesh UVs.
+    """
+    path = f"{ROOT}/Materials/{name}"
+    if eal.does_asset_exist(path):
+        return eal.load_asset(path)
+    mat = tools.create_asset(name, f"{ROOT}/Materials", unreal.Material, unreal.MaterialFactoryNew())
+    mel = unreal.MaterialEditingLibrary
+    # the water plane's winding is flipped by its negative-Z instance scale, so it is two-sided in practice
+    mat.set_editor_property("two_sided", True)
+    mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
+    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 0)
+    tb.set_editor_property("parameter_name", "BaseColor")
+    tb.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
+    tint = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -700, 260)
+    tint.set_editor_property("parameter_name", "WaterTint")
+    tint.set_editor_property("default_value", unreal.LinearColor(0.05, 0.28, 0.30, 1.0))
+    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -450, 100)
+    mel.connect_material_expressions(tb, "RGB", mul, "A")
+    mel.connect_material_expressions(tint, "", mul, "B")
+    mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_BASE_COLOR)
+    op = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -450, 250)
+    op.set_editor_property("r", 0.62)
+    mel.connect_material_property(op, "", unreal.MaterialProperty.MP_OPACITY)
+    tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 420)
+    tn.set_editor_property("parameter_name", "Normal")
+    tn.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"))
+    tn.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+    mel.connect_material_property(tn, "RGB", unreal.MaterialProperty.MP_NORMAL)
+    mel.recompile_material(mat)
+    eal.save_loaded_asset(mat)
+    return mat
+
+
 def make_materials(tex_paths):
     masters = {
         (False, False): make_master("M_RF_Flat", False, False),
@@ -128,15 +213,46 @@ def make_materials(tex_paths):
         ("m", True): make_master("M_RF_TexNM", True, True, True),
     }
     mel = unreal.MaterialEditingLibrary
+    trans_master = make_translucent_master("M_RF_Translucent")
+    trans_master_lum = make_translucent_master("M_RF_TranslucentLum", alpha=False)
+    water_masters = {}
+
+    def water_master(with_base, with_normal):
+        """Single-layer water preview: translucent teal base multiplied by the water texture, animated normals.
+        This is not the game's shader (refraction/absorption/caustics are not reconstructed); it is the minimum
+        that reads as water instead of an opaque grey plane."""
+        key = (with_base, with_normal)
+        if key not in water_masters:
+            water_masters[key] = make_water_master(f"M_RF_Water_{int(with_base)}{int(with_normal)}")
+        return water_masters[key]
+
     out = {}
     for key, m in scene["materials"].items():
         has_b = bool(m["base"]) and m["base"] in tex_paths and eal.does_asset_exist(tex_paths[m["base"]])
+        if m.get("water"):
+            log("water material", key, m.get("base"), has_b, m.get("normal"), m.get("normal") in tex_paths)
         has_n = bool(m["normal"]) and m["normal"] in tex_paths and eal.does_asset_exist(tex_paths[m["normal"]])
-        parent = masters[("m", has_n)] if (m.get("masked") and has_b) else masters[(has_b, has_n)]
+        water = bool(m.get("water"))
+        # Particle additive/soft particles often bind only an effect texture: without a base colour we cannot
+        # reproduce them from a plain mask, and a flat translucent card would cover the scene. Leave those out
+        # rather than fake them; they are reported in the import result.
+        translucent = bool(m.get("translucent")) and has_b
+        if m.get("translucent") and not has_b:
+            res["translucent_skipped"] = res.get("translucent_skipped", 0) + 1
+            continue
+        if water:
+            parent = water_master(has_b, has_n)
+        elif translucent:
+            # BC1/BC7 sheets without an alpha channel: mask on luminance instead of drawing a solid card
+            tex_rec = scene["textures"].get(m["base"]) or {}
+            parent = trans_master_lum if tex_rec.get("format", "").startswith("BC1") else trans_master
+        else:
+            parent = masters[("m", has_n)] if (m.get("masked") and has_b) else masters[(has_b, has_n)]
         mi_path = f"{ROOT}/Materials/MI_{key}"
         if eal.does_asset_exist(mi_path):
-            out[key] = eal.load_asset(mi_path)
-            continue
+            # parent / blend mode may have changed since the last import (e.g. a mesh became water); the level
+            # is rebuilt every run, so regenerating the instance is cheap and avoids stale parent chains
+            eal.delete_asset(mi_path)
         mi = tools.create_asset(f"MI_{key}", f"{ROOT}/Materials", unreal.MaterialInstanceConstant,
                                 unreal.MaterialInstanceConstantFactoryNew())
         mel.set_material_instance_parent(mi, parent)
@@ -225,6 +341,23 @@ def main():
     insts = scene["instances"]
     if os.environ.get("RF_ONLY_KIND"):
         insts = [i for i in insts if i["kind"] == os.environ["RF_ONLY_KIND"]]
+    # RF_HIDE_MESH=id[,id] drops meshes from the import (used to isolate whether a large unidentified mesh
+    # occludes the view; not part of the normal pipeline)
+    hide = {x for x in os.environ.get("RF_HIDE_MESH", "").split(",") if x}
+    if hide:
+        insts = [i for i in insts if i["mesh"] not in hide]
+        log("hidden meshes", sorted(hide))
+    # Near-field translucent effects (dust, splashes) sit within ~20 m of the capture camera and cover most of the
+    # frame in a preview reconstruction without their particle shading. Hidden by default; RF_SHOW_NEAR_FX=1 shows.
+    if not os.environ.get("RF_SHOW_NEAR_FX"):
+        cam = scene.get("camera")
+        if cam:
+            c = unreal.Vector(*cam["position"])
+            def near_effect(i):
+                if i["kind"] != "translucent":
+                    return False
+                return unreal.Vector(*i["location"]).__sub__(c).length() < 2500.0  # cm
+            insts = [i for i in insts if not near_effect(i)]
     used = []
     for i in insts:
         if i["mesh"] not in used:

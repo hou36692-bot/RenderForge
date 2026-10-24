@@ -23,7 +23,7 @@ L8 编排         █████░░░░░ 50%  registry/games/recipes/doc
 
 | 游戏 | 引擎 | 截帧 | 摄入 | 源资源读取 | 对账 | UE 5.8 | Unity | 主要缺口 |
 |---|---|---|---|---|---|---|---|---|
-| 鸣潮 WuWa | UE4 | RenderDoc ✅ | ✅ | CUE4Parse ✅(用户) | 全库索引，96% 实例带源名 | ✅ | ✅ | 透明/水/植被 pass、天空光照、部分数组网格 |
+| 鸣潮 WuWa | UE4 | RenderDoc ✅ | ✅ | CUE4Parse ✅(用户) | 全库索引，96% 实例带源名 | ✅ | ✅ | 透明 pass 部分合并；水面材质已挂但截图不可见；粒子/billboard 跳过；天空光照未做 |
 | 绝区零 ZZZ | Unity | 3DMigoto ✅ | ✅ | AnimeStudio ✅(用户,游戏未装) | ⬜ | ✅ 角色 | ✅ 角色 | 头/脸(GPU 间接绘制)、世界放置 |
 | 原神 / 星铁 | Unity | 3DMigoto(未测) | 预期可用 | AnimeStudio(未测) | ⬜ | ⬜ | ⬜ | 本机无安装、无截帧：全部未验证 |
 | 终末地 Endfield | Unity 2021.3 IL2CPP | 未试(有反作弊) | — | ⚠ VFS 加密，通用工具打不开 | ⬜ | ⬜ | ⬜ | 需要游戏专用源适配器；先确认是否要做 |
@@ -39,7 +39,7 @@ L8 编排         █████░░░░░ 50%  registry/games/recipes/doc
 
 **阶段 B（下一步，按价值/风险排序）**
 1. ✅ 对账闭环：SourceProbe `dump-index` 全库索引（41,133 包 / 157,691 section）→ per-draw 精确身份，UE/Unity 对象带源资产名；帧 3422 96.2%、帧 61250 96.8% 实例覆盖
-2. 鸣潮补全：透明/水/植被 pass、天空与光照；同一场景再出一份仅靠源资源的版本（SourceProbe layout → Scene Package）
+2. 鸣潮补全（部分完成，见下）：透明 pass 已导出并合并 73 个实例、水面材质已挂接但画面不可见；粒子/billboard 无法定位已跳过；**未突破**：水面可见性、水线/泡沫/折射/吸收/焦散、天空与光照、仅靠源资源的场景版本（SourceProbe layout → Scene Package）
 3. Agent 入口：把 `doctor/plan/survey/export/build/…` 封成 RenderForge MCP + skill，让 Claude 原生调用，不靠拼命令行
 4. 绝区零适配器：VS 常量缓冲解码得到世界矩阵/相机；评估头脸缺失的绕过办法
 5. 材质：PBR 通道语义（ORM/自发光），Unity URP 与 UE 材质模板，按游戏档案配置
@@ -55,4 +55,5 @@ L8 编排         █████░░░░░ 50%  registry/games/recipes/doc
 - 只有 **WuWa(D3D11, UE)** 和 **ZZZ(3DMigoto)** 有真实数据验证；Unity 解包只在**我自己生成的包**和 Endfield 的一个标准文件上验证过。
 - 源网格身份是**整网格**精确匹配：只画了某个大数组网格一个 section 的 draw 仍然未识别；源索引来自全库 `dump-index`（41,133 个 SM_ 包，其中约 11k 个在当前挂载视图里没有渲染 LOD 数据）。
 - 材质是预览级，不代表原游戏着色效果；动画、蒙皮姿态、光照、天空均未还原。
+- 鸣潮透明/水一轮的如实状态：透明 pass（67 draw）独立导出并合并，73 个实例有仿射变换；水面精确识别为 `SM_Old_Wat_08AH` 且 UE 材质链路已核实，但游戏模式截图里水面仍不可见（未定位，首选怀疑是负 Z 缩放导致绕序翻转）；粒子与 billboard 无可靠变换已跳过；depth-only 植被 pass 与主 pass 重复、未合并。
 - RenderDoc 版本：本机 1.45，上游已到 1.46；renderdoc-mcp 二进制只有 v0.3.0（内置 1.43 运行库），v0.3.1 需自行编译。

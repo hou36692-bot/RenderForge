@@ -114,7 +114,8 @@ def cmd_build(a):
     c = load_case(a.case)
     rtc = a.rt_count or (c.get("scene_pass") or {}).get("rt_count")
     filt = (lambda d: len(d["rts"]) == rtc) if rtc else None
-    sc = build(case_dir(a.case) / "export", case_dir(a.case) / "build", filt)
+    sc = build(case_dir(a.case) / "export", case_dir(a.case) / "build", filt,
+               extra_export=a.extra_export, extra_pass=a.extra_pass)
     print("VP:", sc["vp"], "match", round(sc["vp_match"], 2))
     print("report:", sc["report"], "| meshes", len(sc["meshes"]), "materials", len(sc["materials"]), "textures", len(sc["textures"]))
     return 0
@@ -326,6 +327,8 @@ def main(argv=None):
         p.add_argument("--range")
         p.add_argument("--rt-count", type=int)
         p.add_argument("--max-instances", type=int)
+        p.add_argument("--extra-export", help="second extract (e.g. depth-only pass) merged into the build")
+        p.add_argument("--extra-pass", default="extra", help="pass label recorded on merged instances")
         p.add_argument("--no-instanced-index", action="store_true",
                        help="instanced draws: skip the canonical index buffer (range/GPU-written), keep vertex range")
         p.add_argument("--emissive", action="store_true", help="albedo preview: base color also drives emissive")

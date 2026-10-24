@@ -52,7 +52,7 @@ def _srv_arrays(ex, draw, nverts, vmin):
         if not sv["file"]:
             continue
         fmt = sv["format"]
-        raw = (ex.root / sv["file"]).read_bytes()
+        raw = (ex.root_of(draw) / sv["file"]).read_bytes()
         if fmt == "R16G16_FLOAT":
             arr, comps = np.frombuffer(raw, dtype="<f2").astype(np.float32), 2
         elif fmt == "R32G32_FLOAT":
@@ -97,13 +97,13 @@ def pick_uv_normal(ex, mesh_id, pos, idx, draw=None):
         if a["perInstance"]:
             continue
         if a["comps"] == 2 and uv is None:
-            arr = ex.mesh_attr(mesh_id, i)
+            arr = ex.mesh_attr(mesh_id, i, draw)
             if np.isfinite(arr).all() and np.abs(arr).max() < 1e4:
                 uv = arr
         elif a["comps"] == 4 and "SNORM" in a["format"]:
-            cands.append(ex.mesh_attr(mesh_id, i)[:, :3])
+            cands.append(ex.mesh_attr(mesh_id, i, draw)[:, :3])
         elif a["comps"] == 3 and a["format"].endswith("FLOAT") and i != ex.position_attr_index(mesh_id):
-            cands.append(ex.mesh_attr(mesh_id, i)[:, :3])
+            cands.append(ex.mesh_attr(mesh_id, i, draw)[:, :3])
     if draw is not None:
         vmin = ex.meshes[mesh_id].get("vmin", 0)
         for sa in _srv_arrays(ex, draw, n, vmin):
@@ -160,26 +160,76 @@ def choose_view_proj(ex, statics, sample=80):
 
 
 def classify_textures(ex, draw):
+    """Base colour + normal map from the pixel shader's texture bindings.
+
+    The shader-view format is used when the export recorded it (an SRGB view of a plain UNORM texture is the
+    game saying "this is colour"), and a tangent-space normal map is taken from the conventional compressed
+    formats including the BC7 workaround WuWa uses instead of BC5.
+    """
+    def view_fmt(t):
+        f = t.get("view") or t["format"]
+        return t["format"] if (not isinstance(f, str) or "Swig" in f) else f
     base = normal = None
     for t in draw["textures"]:
         info = ex.data["textures"].get(t["res"])
         if not info or not info["file"] or info["dynamic"]:
             continue
-        f = t["format"]
-        if base is None and "SRGB" in f and info["w"] >= 16:
+        if base is None and "SRGB" in view_fmt(t) and info["w"] >= 16:
             base = t["res"]
-        elif normal is None and f.startswith("BC5") and info["w"] >= 16:
+    for t in draw["textures"]:
+        info = ex.data["textures"].get(t["res"])
+        if not info or not info["file"] or info["dynamic"] or t["res"] == base:
+            continue
+        f = view_fmt(t)
+        if normal is None and (f.startswith("BC5") or info["format"] in ("BC5_TYPELESS", "BC7_TYPELESS")) and info["w"] >= 16:
             normal = t["res"]
+    if base is None:
+        # translucent / unlit sheets are often bound through a plain UNORM view; take the first colour-sized map
+        for t in draw["textures"]:
+            info = ex.data["textures"].get(t["res"])
+            if not info or not info["file"] or info["dynamic"] or info["w"] < 16:
+                continue
+            f = view_fmt(t)
+            if f.startswith(("BC1", "BC3", "BC7", "B8G8R8A8", "R8G8B8A8")) and info["format"] not in ("D24S8_TYPELESS",):
+                base = t["res"]
+                break
     return base, normal
 
 
-def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, strict_tol=1e-5, sky_radius=60000.0):
+def pass_kind(draw):
+    """Coarse pass class: a draw that writes the scene colour plus one extra 8-bit buffer in this pass set is the
+    translucent (particle / glass / water-line) batch, as opposed to the opaque G-buffer or a colour composite."""
+    rt = draw.get("rtFormats") or []
+    extra = draw.get("writes_extra") or []
+    if rt and rt[0] == "R16G16B16A16_FLOAT" and len(extra) == 1 and extra[0].startswith("R8G8B8A8"):
+        return "translucent"
+    return "static"
+
+
+def merge_texture_table(ex, other):
+    """Make another extract's texture records resolvable through `ex` (same ids; file paths stay absolute)."""
+    for k, v in other.data.get("textures", {}).items():
+        ex.data["textures"].setdefault(k, v)
+
+
+def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, strict_tol=1e-5, sky_radius=60000.0,
+          extra_export=None, extra_pass="extra"):
     ex = Extract(export_dir)
     out = Path(out_dir)
     if out.exists():
         shutil.rmtree(out)
     (out / "meshes").mkdir(parents=True)
     draws = [d for d in ex.draws if (draw_filter is None or draw_filter(d))]
+    extra_draws = None
+    if extra_export:
+        xex = Extract(extra_export)
+        for d in xex.draws:
+            d["pass"] = extra_pass
+        extra_draws = xex.draws
+        have = {d["eid"] for d in draws}
+        extra_draws = [d for d in extra_draws if d["eid"] not in have]
+        ex.merge_draws(xex, kind=extra_pass)
+        merge_texture_table(ex, xex)
 
     dmap = {d['eid']: d for d in draws}
     # 1. fit local->clip per draw instance (post-VS buffer holds all instances back to back)
@@ -227,16 +277,71 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
         scene["meshes"][mid] = {"dir": f"meshes/{mid}", "verts": int(len(pos)), "tris": int(len(idx) // 3),
                                 "has_nrm": nrm is not None, "has_uv": uv is not None}
 
-    def mat_key(base, normal, masked=False):
+    def mat_key(base, normal, masked=False, root=None):
         key = f"mat_{(base or 'none').split('::')[-1]}_{(normal or 'none').split('::')[-1]}" + ("_m" if masked and base else "")
         if key not in scene["materials"]:
             scene["materials"][key] = {"base": base, "normal": normal, "masked": bool(masked and base)}
+            root = root or ex.root
             for t in (base, normal):
                 if t and t not in scene["textures"]:
-                    scene["textures"][t] = {"file": str(ex.root / ex.data["textures"][t]["file"]),
+                    scene["textures"][t] = {"file": str(root / ex.data["textures"][t]["file"]),
                                             "w": ex.data["textures"][t]["w"], "h": ex.data["textures"][t]["h"],
                                             "format": ex.data["textures"][t]["format"]}
         return key
+
+    # extra passes (depth-only, transparent): same camera, no influence on VP selection, never rebaked
+    extra_ok = 0
+    for xi, xd in enumerate(extra_draws or []):
+        pi = ex.position_attr_index(xd["mesh"])
+        vs_all = ex.vsout(xd)
+        if pi is None or vs_all is None:
+            report["extra_skipped"] = report.get("extra_skipped", 0) + 1
+            continue
+        pos = ex.mesh_attr(xd["mesh"], pi, xd)
+        n = len(pos)
+        if n == 0 or len(vs_all) % n:
+            report["extra_skipped"] = report.get("extra_skipped", 0) + 1
+            continue
+        for k in range(len(vs_all) // n):
+            vs = vs_all[k * n:(k + 1) * n]
+            M, err = fit_local_to_clip(pos, vs)
+            if M is None:
+                continue
+            W = M @ Ci
+            if proj_score(W) < 1e-3:
+                W, _ = regularize_planar(W, pos)
+            # a fitted "world" matrix with an absurd scale means the fit absorbed clip-space w (near-plane or
+            # billboard vertices); treat it like a failed fit instead of placing a 256x quad at the origin
+            if W[3, 3] != 0 and np.abs(W[:3, :3] / W[3, 3]).max() > 50:
+                W = None
+            if W is None or err >= tol or proj_score(W) >= 1e-3:
+                # Billboards / camera-facing quads: local->clip is not a rigid fit and the instance transform is not
+                # recoverable this way. Baking the clip-space quad was tried and collapsed into duplicate cards at
+                # the camera; an unshaded placeholder is worse than an honest gap.
+                report["extra_skipped"] = report.get("extra_skipped", 0) + 1
+                continue
+            base, normal = classify_textures(ex, xd)
+            mk = mat_key(base, normal, xd.get("psDiscard", False), root=ex.root_of(xd))
+            W = W / W[3, 3]
+            mid = xd["mesh"]
+            if mid not in mesh_done:
+                idx = np.fromfile(ex.root_of(xd) / xd.get("mesh_dir", "meshes/" + xd["mesh"]) / "idx.u32", dtype="u4")
+                if len(idx) % 3:
+                    report["extra_skipped"] = report.get("extra_skipped", 0) + 1
+                    continue
+                uv, nrm = pick_uv_normal(ex, xd["mesh"], pos[:, :3], idx, xd)
+                if nrm is None:
+                    nrm = vertex_normals(pos[:, :3].astype(np.float64), idx)
+                write_mesh(mid, pos[:, :3], nrm, uv, idx)
+                mesh_done.add(mid)
+            loc, quat, scl = decompose(W)
+            scene["instances"].append({"eid": xd["eid"], "inst": k, "mesh": mid, "matrix": W.flatten().tolist(),
+                                       "location": loc.tolist(), "quat": quat.tolist(), "scale": scl.tolist(),
+                                       "shear": float(affine_score(W)), "material": mk,
+                                       "kind": xd.get("kind") or "extra",
+                                       "pass": xd.get("pass")})
+            extra_ok += 1
+    report["extra"] = extra_ok
 
     units = [(dmap[eid], k, v) for (eid, k), v in fitted.items()]
     report["skipped"] = len(draws) - len({u[0]["eid"] for u in units})
@@ -288,6 +393,21 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
                                        "location": [0.0, 0.0, 0.0], "quat": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0],
                                        "material": mk, "kind": "baked", **ident})
             report["baked"] += 1
+
+    # Water is a semantic, not a base-colour hint: the game's water mesh is shaded by a dedicated pass.
+    # Mark those instances so the emitters can give them a water material instead of the preview base colour.
+    def is_water_name(src):
+        return bool(src) and "/Water/" in src.get("object", "")
+    for inst in scene["instances"]:
+        if inst.get("kind") == "static" and is_water_name(inst.get("source")):
+            inst["kind"] = "water"
+        if inst.get("kind") in ("water", "translucent"):
+            mat = scene["materials"].get(inst.get("material"))
+            if mat is not None:
+                mat["water" if inst["kind"] == "water" else "translucent"] = True
+    for mid, m in scene["meshes"].items():
+        if is_water_name(m.get("source")):
+            m["water"] = True
 
     scene["camera"] = camera_from_vp(C, 16 / 9)
     if scene["instances"] and not scene["camera"]:

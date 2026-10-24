@@ -135,6 +135,22 @@ def identify_draws(ids_json, index_dir):
     }
 
 
+def retag_kinds(scene):
+    """Water meshes are named by `identify`, which runs after the build: re-derive the kind here as well."""
+    def water(src):
+        return bool(src) and "/Water/" in src.get("object", "")
+    for inst in scene["instances"]:
+        if inst.get("kind") == "static" and water(inst.get("source")):
+            inst["kind"] = "water"
+        if inst.get("kind") in ("water", "translucent"):
+            mat = scene["materials"].get(inst.get("material"))
+            if mat is not None:
+                mat["water" if inst["kind"] == "water" else "translucent"] = True
+    for mid, m in scene["meshes"].items():
+        if water(m.get("source")):
+            m["water"] = True
+
+
 def apply_draws(scene_path, draw_identity):
     """Attach per-draw source identity to scene instances (eid -> source), and name meshes only when every draw
     that uses that mesh agrees on one source section."""
@@ -154,6 +170,7 @@ def apply_draws(scene_path, draw_identity):
             o, lod, sec = next(iter(srcs))
             scene["meshes"][mid]["source"] = {"object": o, "lod": lod, "section": sec, "level": "exact"}
             named += 1
+    retag_kinds(scene)
     scene["identity"] = {"mode": "draw", "drawsMatched": draw_identity["drawsMatched"], "draws": draw_identity["draws"],
                          "instancesMatched": draw_identity["instancesMatched"], "instances": draw_identity["instances"],
                          "uniqueSourceObjects": draw_identity["uniqueSourceObjects"], "meshesNamed": named}

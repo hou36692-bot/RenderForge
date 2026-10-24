@@ -12,15 +12,40 @@ class Extract:
         self.meshes = self.data["meshes"]
         self.draws = self.data["draws"]
         self._cb = {}
+        # draws merged in from a second extract (e.g. a depth-only pass exported separately) keep their own files
+        self.extra_roots = {}
+
+    def root_of(self, draw):
+        return self.extra_roots.get(id(draw), self.root)
+
+    def merge_draws(self, other, prefix="x", kind=None):
+        """Append another extract's draws with namespaced mesh ids (both extracts number meshes m0000...).
+
+        Each merged draw keeps its original mesh directory in `mesh_dir`; its files resolve under the other root.
+        """
+        for mid, rec in other.meshes.items():
+            self.meshes[prefix + mid] = rec
+        for d in other.draws:
+            d["mesh_dir"] = "meshes/" + d["mesh"]
+            d["mesh"] = prefix + d["mesh"]
+            if kind:
+                d["kind"] = kind
+            self.extra_roots[id(d)] = other.root
+            self.draws.append(d)
+        return self
 
     def cbuffer(self, h):
         if h not in self._cb:
             self._cb[h] = np.fromfile(self.root / "cbuffers" / (h + ".bin"), dtype="f4")
         return self._cb[h]
 
-    def mesh_attr(self, mesh_id, idx):
+    def mesh_attr(self, mesh_id, idx, draw=None):
         a = self.meshes[mesh_id]["attrs"][idx]
-        arr = np.fromfile(self.root / "meshes" / mesh_id / a["file"], dtype="f4")
+        if draw is not None and "mesh_dir" in draw:
+            root, d = self.root_of(draw), draw["mesh_dir"]
+        else:
+            root, d = self.root, "meshes/" + mesh_id
+        arr = np.fromfile(root / d / a["file"], dtype="f4")
         return arr.reshape(-1, a["comps"])
 
     def position_attr_index(self, mesh_id):
@@ -33,7 +58,7 @@ class Extract:
         p = draw["postVS"]
         if not p:
             return None
-        return np.fromfile(self.root / p["file"], dtype="f4").reshape(-1, 4)
+        return np.fromfile(self.root_of(draw) / p["file"], dtype="f4").reshape(-1, 4)
 
 
 def fit_local_to_clip(pos, clip, max_samples=400, seed=0):

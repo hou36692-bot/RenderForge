@@ -150,6 +150,15 @@ def make_materials(tex_paths):
 
 
 # ---------------- meshes ----------------
+def source_name(mid):
+    """Source asset name for a mesh: SM_<asset>_<section> when identified, else RF_<id>."""
+    src = scene["meshes"][mid].get("source")
+    if not src:
+        return "RF_" + mid
+    base = src["object"].split(".")[-1].split("/")[-1]
+    return "SM_" + base + "_S%d" % src["section"]
+
+
 def make_mesh(mid):
     info = scene["meshes"][mid]
     d = os.path.join(sdir, info["dir"])
@@ -257,7 +266,7 @@ def main():
             i = lst[0]
             q = unreal.Quat(*i["quat"])
             a.set_actor_transform(unreal.Transform(unreal.Vector(*i["location"]), q.rotator(), unreal.Vector(*i["scale"])), False, False)
-            a.set_actor_label(f"{mid}_{i['eid']}")
+            a.set_actor_label(f"{source_name(mid)}_{i['eid']}")
             res["actors"] += 1
             res["instances"] += 1
         else:
@@ -271,7 +280,7 @@ def main():
                 q = unreal.Quat(*i["quat"])
                 tfs.append(unreal.Transform(unreal.Vector(*i["location"]), q.rotator(), unreal.Vector(*i["scale"])))
             comp.add_instances(tfs, False, True)
-            a.set_actor_label(f"ISM_{mid}_{mk}")
+            a.set_actor_label(f"ISM_{source_name(mid)}_{mk}")
             res["actors"] += 1
             res["instances"] += len(lst)
     # basic lighting so the level is viewable

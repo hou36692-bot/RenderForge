@@ -120,11 +120,15 @@ def main():
             out.extend(vals)
         return out, n
 
-    def indices_for(st, a):
+    def indices_for(st, a, allow_instanced=True):
         ib = st.GetIBuffer()
         indexed = bool(a.flags & rd.ActionFlags.Indexed)
         if not indexed:
             return None, None, list(range(a.numIndices)), a.vertexOffset
+        # Instanced instancing may draw a range of a bigger index buffer (ShowAll draws) or read parameters
+        # written by the GPU; one canonical buffer per mesh would then be the wrong identity. Opt out.
+        if a.numInstances > 0 and not allow_instanced:
+            return None, None, None, a.baseVertex
         stride = ib.byteStride or 2
         off = ib.byteOffset + a.indexOffset * stride
         raw = ctrl.GetBufferData(ib.resourceId, off, a.numIndices * stride)
@@ -180,6 +184,40 @@ def main():
         log("survey done", len(rows))
         return ctrl, cap
 
+    if JOB["mode"] == "ids":
+        # Draw identity without geometry: ordered indices per draw, the draw's position fetch, instance count.
+        # Enough to hash a draw's index list for source-mesh identification without exporting vertex data.
+        rows = []
+        for a, path in draws:
+            try:
+                ctrl.SetFrameEvent(a.eventId, True)
+                st = ctrl.GetPipelineState()
+                ib, istride, idx, basev = indices_for(st, a)
+                vins = st.GetVertexInputs()
+                vbs = st.GetVBuffers()
+                posl = None
+                for v in vins:
+                    if v.name == "ATTRIBUTE0" and v.vertexBuffer < len(vbs):
+                        vb = vbs[v.vertexBuffer]
+                        posl = {"vb": rid(vb.resourceId), "vbOff": vb.byteOffset, "vbStride": vb.byteStride,
+                                "off": v.byteOffset, "fmt": fmt_name(v.format), "perInstance": bool(v.perInstance),
+                                "comps": v.format.compCount, "compBytes": v.format.compByteWidth,
+                                "compType": str(v.format.compType)}
+                        break
+                rows.append({"eid": a.eventId, "path": path, "numIndices": a.numIndices,
+                             "numInstances": a.numInstances, "indexed": bool(a.flags & rd.ActionFlags.Indexed),
+                             "topology": str(st.GetPrimitiveTopology()),
+                             "ib": rid(ib.resourceId) if ib else None,
+                             "ibOff": ib.byteOffset if ib else None, "ibStride": istride,
+                             "indexOffset": a.indexOffset, "baseVertex": basev, "vertexOffset": a.vertexOffset,
+                             "indices": idx, "position": posl})
+            except Exception:
+                log("ids fail eid", a.eventId, traceback.format_exc())
+        json.dump({"rdc": JOB["rdc"], "api": str(api), "draws": rows},
+                  open(os.path.join(OUT, "ids.json"), "w"), indent=1)
+        log("ids done", len(rows))
+        return ctrl, cap
+
     # ---------- export ----------
     want = None
     if JOB.get("eids"):
@@ -196,6 +234,7 @@ def main():
 
     saved_tex = {}
     mesh_cache = {}
+    draws_of_mesh = {}
     meshes = {}
     out_draws = []
 
@@ -268,18 +307,27 @@ def main():
     def export_draw(a, path):
         ctrl.SetFrameEvent(a.eventId, True)
         st = ctrl.GetPipelineState()
-        ib, istride, idx, basev = indices_for(st, a)
+        allow_inst = not JOB.get("no_instanced_index")
+        ib, istride, idx, basev = indices_for(st, a, allow_inst)
+        if idx is None:
+            return {"eid": a.eventId, "mesh": None, "skipped": "instanced index range not canonical"}
         if not idx:
             return None
-        mn, mx = min(idx) + basev, max(idx) + basev
-        nverts = mx - mn + 1
+        # For an instanced draw, idx is the whole index buffer, not this draw's range: the vertex range must come
+        # from the draw action, not from min/max over idx.
+        if a.numInstances > 0 and not allow_inst:
+            mn, nverts = a.vertexOffset, a.numIndices
+        else:
+            mn, mx = min(idx) + basev, max(idx) + basev
+            nverts = mx - mn + 1
         if nverts <= 0 or nverts > 5000000:
             return None
         vbs = st.GetVBuffers()
         vins = st.GetVertexInputs()
         sig = (rid(ib.resourceId) if ib else "", ib.byteOffset if ib else 0, a.indexOffset, a.numIndices, basev,
+               a.vertexOffset if (a.numInstances > 0 and not allow_inst) else 0,
                tuple((rid(vbs[v.vertexBuffer].resourceId), vbs[v.vertexBuffer].byteOffset, v.byteOffset,
-                      vbs[v.vertexBuffer].byteStride, fmt_name(v.format)) for v in vins))
+                      vbs[v.vertexBuffer].byteStride, fmt_name(v.format), bool(v.perInstance)) for v in vins))
         mid = mesh_cache.get(sig)
         topo = str(st.GetPrimitiveTopology())
         if mid is None:
@@ -287,9 +335,12 @@ def main():
             mesh_cache[sig] = mid
             md = os.path.join(mesh_dir, mid)
             os.makedirs(md, exist_ok=True)
+            # Whole-IB canonical buffer: every draw that shares the buffer gets the same normalized indices, so
+            # each draw's own index slice (read back from the draw) is the exact identity token.
             iarr = array("I", [i + basev - mn for i in idx])
             with open(os.path.join(md, "idx.u32"), "wb") as f:
                 f.write(iarr.tobytes())
+            draws_of_mesh[mid] = {"vmin": mn, "nverts": nverts}
             attrs = []
             vbdata = {}
             seen = {}
@@ -397,20 +448,27 @@ def main():
         except Exception:
             log("srv fail eid", a.eventId, traceback.format_exc())
         outs = [o for o in a.outputs if o != rd.ResourceId.Null()]
+        info = draws_of_mesh[mid]
+        own = [i + basev - info["vmin"] for i in idx[a.indexOffset:a.indexOffset + a.numIndices]] if (
+            a.numInstances == 0 and len(idx) > a.numIndices) else None
         return {"eid": a.eventId, "mesh": mid, "vsSrvs": srvs, "psDiscard": pixel_shader_discards(st), "name": a.GetName(sf), "path": path, "topology": topo,
                 "numInstances": a.numInstances, "postVS": post, "cbuffers": cbs, "textures": texs,
+                "vmin": info["vmin"], "nverts": info["nverts"], "ownIndices": own,
                 "vs": rid(st.GetShader(rd.ShaderStage.Vertex)), "ps": rid(st.GetShader(rd.ShaderStage.Pixel)),
                 "rts": [rid(o) for o in outs]}
 
     n_ok = 0
+    n_inst_sel = 0
     for a, path in draws:
         if want is not None and a.eventId not in want:
             continue
         try:
             d = export_draw(a, path)
-            if d:
+            if d and d.get("mesh"):
                 out_draws.append(d)
                 n_ok += 1
+            elif d:
+                log("export skip eid", a.eventId, d.get("skipped"))
         except Exception:
             log("export fail eid", a.eventId, traceback.format_exc())
     # reference backbuffer
@@ -427,7 +485,8 @@ def main():
     except Exception:
         log("backbuffer save fail", traceback.format_exc())
     with open(os.path.join(OUT, "extract.json"), "w") as f:
-        json.dump({"rdc": JOB["rdc"], "api": str(api), "draws": out_draws, "meshes": meshes, "textures": saved_tex}, f, indent=1)
+        json.dump({"rdc": JOB["rdc"], "api": str(api), "draws": out_draws, "meshes": meshes, "textures": saved_tex,
+                   "flags": {k: JOB[k] for k in ("no_instanced_index",) if k in JOB}}, f, indent=1)
     log("export done draws=%d meshes=%d textures=%d" % (n_ok, len(meshes), len(saved_tex)))
     return ctrl, cap
 

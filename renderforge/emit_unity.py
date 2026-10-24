@@ -28,6 +28,14 @@ def _auto_camera(scene_dir, sc):
     return {"position": (c + np.array([0, 0, -dist])).tolist(), "forward": [0, 0, 1], "up": [0, 1, 0], "vfov_deg": 30.0, "hfov_deg": 50.0}
 
 
+def _source_name(m):
+    src = m.get("source")
+    if not src:
+        return None
+    base = src["object"].split(".")[-1].split("/")[-1]
+    return f"SM_{base}_S{src['section']}"
+
+
 def emit(scene_dir, out_dir, case):
     from .space import convert_scene
     out = Path(out_dir)
@@ -53,7 +61,8 @@ def emit(scene_dir, out_dir, case):
             uv = np.fromfile(d / "uv.f32", dtype="<f4").reshape(-1, 2).copy()
             uv[:, 1] = 1.0 - uv[:, 1]
             uv.astype("<f4").tofile(out / "meshes" / mid / "uv.f32")
-        meshes.append({"id": mid, "verts": int(len(pos)), "indices": int(len(idx)), "hasNormals": has_n, "hasUV": has_uv})
+        meshes.append({"id": mid, "verts": int(len(pos)), "indices": int(len(idx)), "hasNormals": has_n, "hasUV": has_uv,
+                       "name": _source_name(m)})
     tex = [{"id": k.replace("::", "_"), "file": v["file"], "format": v["format"]} for k, v in sc["textures"].items()]
     tex_ids = {k: k.replace("::", "_") for k in sc["textures"]}
     mats = [{"id": k, "baseTexture": tex_ids.get(m["base"], "") if m["base"] else "",

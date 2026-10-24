@@ -7,6 +7,7 @@
   build-model <case> [--game zzz]      model-space scene (no post-VS data)
   ingest-unity <case> --bundle <file>  Unity bundle / serialized file -> Scene Package (no GPU capture)
   match <case> --fingerprints <dir>    identify captured meshes among source meshes
+  identify <case> --index <dir> [--ids ids.json] [--apply]  exact whole-library source identification
   unity-import <case>                  emit + import into headless Unity, render a PNG
 
 RenderDoc route, per case:  survey -> export -> build -> ue-import -> shot
@@ -99,6 +100,8 @@ def cmd_export(a):
         c["scene_pass"] = {"rt_count": g["rt_count"], "size": g["size"], "draws": g["n"]}
         save_case(a.case, c)
         print(f"auto-selected pass: RT x{g['rt_count']} {g['size']} draws={g['n']}")
+    if a.no_instanced_index:
+        job["no_instanced_index"] = True
     if out.exists():
         shutil.rmtree(out)
     rc = rd_run.run("rf_extract.py", job)
@@ -254,6 +257,33 @@ def cmd_match(a):
     return 0
 
 
+def cmd_identify(a):
+    from .identify import identify, identify_draws, apply, apply_draws
+    if a.ids:
+        res = identify_draws(a.ids, a.index)
+        p = case_dir(a.case) / "draw_identity.json"
+        p.write_text(json.dumps(res, indent=1), encoding="utf-8")
+        print(f"source sections {res['sourceSections']}; draws {res['drawsMatched']}/{res['draws']} matched; "
+              f"instances {res['instancesMatched']}/{res['instances']}; unique source objects {res['uniqueSourceObjects']} -> {p}")
+        sp = case_dir(a.case) / "build" / "scene.json"
+        if sp.exists() and a.apply:
+            print("scene.json draw identity:", apply_draws(sp, res))
+        return 0
+    if not a.index:
+        print("identify needs --index <SourceProbe dump-index dir>, or --ids <ids.json> with --index")
+        return 1
+    from .identify import identify_export, apply_draws
+    res = identify_export(case_dir(a.case) / "export", a.index)
+    p = case_dir(a.case) / "draw_identity.json"
+    p.write_text(json.dumps(res, indent=1), encoding="utf-8")
+    print(f"source sections {res['sourceSections']}; draws {res['drawsMatched']}/{res['draws']} matched; "
+          f"instances {res['instancesMatched']}/{res['instances']}; unique source objects {res['uniqueSourceObjects']} -> {p}")
+    sp = case_dir(a.case) / "build" / "scene.json"
+    if sp.exists() and a.apply:
+        print("scene.json draw identity:", apply_draws(sp, res))
+    return 0
+
+
 def cmd_ingest_unity(a):
     from .ingest_unity import ingest_bundle
     c = load_case(a.case)
@@ -278,7 +308,8 @@ def main(argv=None):
     for name, fn in (("survey", cmd_survey), ("export", cmd_export), ("build", cmd_build), ("ue-import", cmd_ue_import),
                      ("shot", cmd_shot), ("compare", cmd_compare), ("run", cmd_run),
                      ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
-                     ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match)):
+                     ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match),
+                     ("identify", cmd_identify)):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
         p.add_argument("--game")
@@ -286,12 +317,17 @@ def main(argv=None):
         p.add_argument("--frame-dir")
         p.add_argument("--bundle")
         p.add_argument("--fingerprints")
+        p.add_argument("--index")
+        p.add_argument("--ids")
+        p.add_argument("--apply", action="store_true")
         p.add_argument("--max-extent", type=float, default=3.0)
         p.add_argument("--min-tris", type=int, default=100)
         p.add_argument("--rdc")
         p.add_argument("--range")
         p.add_argument("--rt-count", type=int)
         p.add_argument("--max-instances", type=int)
+        p.add_argument("--no-instanced-index", action="store_true",
+                       help="instanced draws: skip the canonical index buffer (range/GPU-written), keep vertex range")
         p.add_argument("--emissive", action="store_true", help="albedo preview: base color also drives emissive")
         p.add_argument("--cmd")
         p.add_argument("--ticks", type=int, default=900)

@@ -251,6 +251,7 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
         W = M @ Ci
         if proj_score(W) < 1e-3:
             W, _ = regularize_planar(W, pos)
+        ident = {"ident": d.get("ident")} if d.get("ident") else {}
         if err < tol and proj_score(W) < 1e-3:
             W = W / W[3, 3]
             if d["mesh"] not in mesh_done:
@@ -266,7 +267,7 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
                 continue
             scene["instances"].append({"eid": d["eid"], "inst": k, "mesh": d["mesh"], "matrix": W.flatten().tolist(),
                                        "location": loc.tolist(), "quat": quat.tolist(), "scale": scl.tolist(),
-                                       "shear": float(affine_score(W)), "material": mk, "kind": "static"})
+                                       "shear": float(affine_score(W)), "material": mk, "kind": "static", **ident})
             report["static"] += 1
         else:
             w = vs.astype(np.float64) @ Ci
@@ -285,7 +286,7 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
             write_mesh(bid, world, vertex_normals(world, idx_b), uv_b, idx_b)
             scene["instances"].append({"eid": d["eid"], "inst": k, "mesh": bid, "matrix": np.eye(4).flatten().tolist(),
                                        "location": [0.0, 0.0, 0.0], "quat": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0],
-                                       "material": mk, "kind": "baked"})
+                                       "material": mk, "kind": "baked", **ident})
             report["baked"] += 1
 
     scene["camera"] = camera_from_vp(C, 16 / 9)

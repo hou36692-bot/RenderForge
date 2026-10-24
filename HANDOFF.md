@@ -6,6 +6,8 @@
 构建以 Claude Code 对话为入口的**多游戏、多引擎图形资源重建工具箱**（不是单一 RenderDoc→UE Demo）。范围以 Unity + Unreal 为主，UE 5.8 与 Unity 6000.0.83f1 同为已验证目标。要求：建立工具能力地图、区分通用截帧/游戏专用提取/模组工具/资源解包、复用成熟项目、游戏适配器互相隔离、区分"已验证"与"理论可行"、文档和路线图如实。用户不熟悉工程细节：自主决策，说明简洁，关键进展简短汇报，不要声称没跑过的功能完成。原始 .rdc/游戏文件只读，生成物放 `workspace/<case>/`。
 
 ## Current Progress（均在本机实际跑过，除非注明）
+- **全库源网格身份（2026-10-24，阶段 B 第 1 项已完成）**：给用户的 SourceProbe 加了 `dump-index`（批量 section 哈希 + 每 LOD 索引字节）。全库 41,133 个 `SM_` 包 → 157,691 个源 section（约 25 分钟，2.8GB 索引，11,206 个包无渲染 LOD 数据）。RenderForge 侧 `renderforge/identify.py`：per-draw 有序索引 SHA-256 精确比对。帧 3422：386/681 draw、27,727/28,823 实例（96.2%）；帧 61250：592/1017 draw、43,336/44,757 实例（96.8%）。`ue-import`/`unity-import` 对象与网格以源资产名命名（`SM_Old_Des_08CS_S0`），未识别保留 `RF_<id>`。`rf_extract` 的 `ids` 模式（无几何导出）+ `--no-instanced-index`（默认关；实例化整 IB 方案在 3422 上验证过，61250 上会丢实例化 draw）。
+- **第二帧端到端**：`workspace/wuwa_61250`（RenderDoc frame 61250，新 scene pass 1017 draws / 26,805 实例）：VP 拟合 0.96、UE 导入 851 网格 / 26,944 实例、截图与原帧对齐（`shots/compare.png`）。
 - **工具箱数据层**：`toolbox/registry.json`（36 个工具，状态词汇 verified-here / verified-synthetic / verified-prior / installed / candidate / reference）、`games.json`（7 个游戏档案，含已验证项和缺口）、`recipes.json`（5 条工作流）、`github_meta.json`（许可证/更新时间快照）。CLI：`python -m renderforge doctor | plan --game X --target unreal|unity | docs`。
 - **RenderDoc 路线**（鸣潮 D3D11，2GB 截帧）：`survey/export/build/ue-import/shot/compare/unity-import`，681 个 GBuffer draw → 19k 实例；VP 自动识别（97% 吻合）；相机在 UE 和 Unity 中都与原帧一致；VS buffer SRV 解 UV/切线；实例化 draw；masked 材质。`rf_extract.py` 在 `qrenderdoc.exe --python` 内无界面运行。
 - **匹配**：`renderforge/match.py` + 用户已有 CUE4Parse 指纹（`D:\HOU\cuibo_reverse\03_source_assets\probes`，892 LOD/282 包）→ 522 个 GPU 网格中 53 个**精确匹配（误差 0）**。
@@ -35,7 +37,7 @@
 鸣潮：透明/水/植被 pass、天空与光照未还原；蒙皮网格冻结在捕获姿态。ZZZ：头脸缺失、世界/相机放置未做（需解码 VS 常量缓冲）；ZZZ 游戏本机未安装，AnimeStudio 未重跑。原神/星铁：无数据，全未验证。终末地：资源在加密 VFS，通用工具打不开，且有反作弊，未尝试注入。Unity 源路线没有商业游戏样本。材质仅预览级。D3D12/Vulkan 未验证。Nsight/PIX 本机未装。
 
 ## Next Steps（ROADMAP 阶段 B）
-1. **批量源网格指纹索引**（CUE4Parse SourceProbe / UnityPy）→ 把匹配覆盖率从 10% 提到可用，并让 scene 里的匹配网格替换为源网格+名称+材质。
+1. ~~批量源网格指纹索引~~ ✅（见上）。后续：把身份用于**替换为源网格 + 源材质**（当前只用源名，几何仍是捕获网格）；数组网格 section 级匹配；UnityPy 侧做同样的批量索引。
 2. 鸣潮补全透明/水/植被 pass、天空光照；并用 SourceProbe `layout` 出一份仅靠源资源的场景包。
 3. 把 doctor/plan/survey/export/build… 封装成 **RenderForge MCP + skill**，让 Claude 原生调用。
 4. 绝区零适配器：解码 VS cbuffer 得世界矩阵/相机；想办法恢复头脸。
@@ -49,4 +51,9 @@ cd D:\HOU\RenderForge
 .venv\Scripts\python.exe -m renderforge doctor
 .venv\Scripts\python.exe -m renderforge plan --game wuwa --target unity
 ```
-已有案例：`workspace/wuwa_bridge`（RenderDoc）、`workspace/zzz_frame01`（3DMigoto）、`workspace/unity_synth`（Unity 合成包）。截图里程碑在 `docs/milestone_*.png`。
+已有案例：`workspace/wuwa_bridge`（RenderDoc 帧 3422）、`workspace/wuwa_61250`（RenderDoc 帧 61250）、`workspace/zzz_frame01`（3DMigoto）、`workspace/unity_synth`（Unity 合成包）。截图里程碑在 `docs/milestone_*.png`。
+
+识别用法：
+```
+.venv\Scripts\python.exe -m renderforge identify wuwa_61250 --index "D:\HOU\cuibo_reverse\03_source_assets\probes\geom_index_all_20261023" --apply
+```

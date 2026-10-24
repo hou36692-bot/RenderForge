@@ -9,7 +9,7 @@ using UnityEditor.SceneManagement;
 // Imports a RenderForge Unity package (unity_scene.json + raw mesh arrays) into the project and builds a scene.
 public static class RFImportScene
 {
-    [Serializable] class MeshInfo { public string id; public int verts; public int indices; public bool hasNormals; public bool hasUV; }
+    [Serializable] class MeshInfo { public string id; public int verts; public int indices; public bool hasNormals; public bool hasUV; public string name; }
     [Serializable] class TexInfo { public string id; public string file; public string format; }
     [Serializable] class MatInfo { public string id; public string baseTexture; public string normalTexture; public bool masked; }
     [Serializable] class InstInfo { public string mesh; public string material; public float[] m; }
@@ -85,7 +85,7 @@ public static class RFImportScene
             var pos = ReadF32(Path.Combine(d, "pos.f32"));
             var v = new Vector3[pos.Length / 3];
             for (int i = 0; i < v.Length; i++) v[i] = new Vector3(pos[3 * i], pos[3 * i + 1], pos[3 * i + 2]);
-            var mesh = new Mesh { name = mi.id, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+            var mesh = new Mesh { name = string.IsNullOrEmpty(mi.name) ? mi.id : mi.name, indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
             mesh.vertices = v;
             mesh.triangles = ReadI32(Path.Combine(d, "idx.u32"));
             if (mi.hasUV)
@@ -117,7 +117,7 @@ public static class RFImportScene
         foreach (var ii in pkg.instances)
         {
             if (!meshes.TryGetValue(ii.mesh, out var mesh)) continue;
-            var go = new GameObject(ii.mesh);
+            var go = new GameObject(meshes[ii.mesh].name);
             go.isStatic = true;
             var mt = new Matrix4x4();
             for (int c = 0; c < 4; c++) mt.SetColumn(c, new Vector4(ii.m[c * 4], ii.m[c * 4 + 1], ii.m[c * 4 + 2], ii.m[c * 4 + 3]));

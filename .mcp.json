@@ -3,6 +3,14 @@
     "renderdoc-mcp": {
       "command": "D:\\HOU\\RenderForge\\tools\\renderdoc-mcp\\bin\\renderdoc-mcp.exe",
       "args": []
+    },
+    "renderforge": {
+      "command": "D:\\HOU\\RenderForge\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "renderforge.mcp_server"],
+      "env": {
+        "PYTHONPATH": "D:\\HOU\\RenderForge",
+        "PYTHONIOENCODING": "utf-8"
+      }
     }
   }
 }

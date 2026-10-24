@@ -10,6 +10,15 @@
   identify <case> --index <dir> [--ids ids.json] [--apply]  exact whole-library source identification
   unity-import <case>                  emit + import into headless Unity, render a PNG
 
+Workbench commands:
+
+  status [case]                       every case: source, stages done, key numbers, inferred next step
+  status --json                       the same, machine-readable
+  run <case> [--from S --to S]        run the case's step graph, skipping steps whose artifacts exist
+  metrics <case> [--shot name.png]    SSIM / MAE / coverage against export/reference_backbuffer.png
+  backfill [--write]                  write case.json for legacy case directories from what the files prove
+  selftest                            offline regression checks on committed fixtures (no GPU / engine needed)
+
 RenderDoc route, per case:  survey -> export -> build -> ue-import -> shot
 
   python -m renderforge survey  <case> --rdc <file.rdc>
@@ -57,6 +66,7 @@ def cmd_survey(a):
     c = load_case(a.case)
     if a.rdc:
         c["rdc"] = str(Path(a.rdc).resolve())
+    c.setdefault("source", "rdc")
     save_case(a.case, c)
     out = case_dir(a.case) / "survey"
     rc = rd_run.run("rf_extract.py", {"mode": "survey", "rdc": c["rdc"], "out": str(out)})
@@ -296,10 +306,79 @@ def cmd_ingest_unity(a):
 
 
 def cmd_run(a):
-    a.range, a.rt_count, a.max_instances, a.cmd, a.ticks = None, None, None, None, 1200
-    for fn in (cmd_survey, cmd_export, cmd_build, cmd_ue_import, cmd_shot, cmd_compare):
-        if fn(a):
-            return 1
+    from . import pipeline
+    res = pipeline.run(a.case, frm=a.from_step, to=a.to_step, force=a.force,
+                       rdc=a.rdc, range=a.range, rt_count=a.rt_count, target=a.target,
+                       extra_export=a.extra_export, extra_pass=a.extra_pass,
+                       max_instances=a.max_instances, cmd=a.cmd, ticks=a.ticks, index=a.index,
+                       ids=a.ids, no_instanced_index=a.no_instanced_index, emissive=a.emissive,
+                       max_extent=a.max_extent, min_tris=a.min_tris, bundle=a.bundle, frame_dir=a.frame_dir,
+                       game=a.game)
+    print(f"steps ran: {[r['step'] for r in res['ran']] or 'none'}")
+    for r in res["ran"]:
+        print(f"  + {r['step']}: {r['result']}")
+    for s in res["skipped"]:
+        print(f"  - {s['step']}: {s['why']}")
+    if res["stopped"]:
+        print(f"STOPPED at {res['stopped']['step']}: {res['stopped']['error']}")
+        print(f"resume with: python -m renderforge run {a.case} --from {res['stopped']['step']}")
+        return 1
+    return 0
+
+
+def cmd_status(a):
+    from . import caseinfo
+    if a.case:
+        info = caseinfo.scan(a.case)
+        if a.json:
+            print(json.dumps(info, indent=1, ensure_ascii=False))
+            return 0
+        rows = caseinfo.summary([info])
+        print(chr(10).join(caseinfo.format_table(rows)))
+        for k, v in info["detail"].items():
+            print(f"  {k}: {json.dumps({x: y for x, y in v.items() if x != 'report'}, ensure_ascii=False)}")
+        if (info["detail"].get("build") or {}).get("report"):
+            print(f"  build report: {json.dumps(info['detail']['build']['report'], ensure_ascii=False)}")
+        for n in info["notes"]:
+            print(f"  ! {n}")
+        print(f"next: {info['next']['step'] or 'nothing'}  --  {info['next']['why']}")
+        if info["next"]["cmd"]:
+            print(f"      {info['next']['cmd'].replace('{case}', a.case)}")
+        return 0
+    cases = caseinfo.scan_all()
+    rows = caseinfo.summary(cases)
+    if a.json:
+        print(json.dumps({"cases": rows, "full": cases}, indent=1, ensure_ascii=False))
+        return 0
+    print(chr(10).join(caseinfo.format_table(rows)))
+    print("\nlegend: +stage = artifact present; next = the one step that moves the case forward")
+    return 0
+
+
+def cmd_metrics(a):
+    from . import pipeline
+    # one implementation for the CLI, the step graph and the MCP tool: both engine shots get scored and recorded
+    res = pipeline.step_metrics(a.case, shot=a.shot)
+    print(json.dumps(res, indent=1, ensure_ascii=False))
+    print("->", case_dir(a.case) / "metrics.json")
+    return 0
+
+
+def cmd_selftest(a):
+    from .selftest import run
+    res = run(verbose=True)
+    return 0 if res["ok"] else 1
+
+
+def cmd_backfill(a):
+    from . import caseinfo
+    made = caseinfo.backfill(write=a.write)
+    if not made:
+        print("no legacy case directories need a case.json")
+    for name, case in made:
+        print(f"{'wrote' if a.write else 'would write'} workspace/{name}/case.json: {json.dumps(case, ensure_ascii=False)}")
+    if made and not a.write:
+        print("\nre-run with --write to create them (nothing else is touched)")
     return 0
 
 
@@ -310,7 +389,8 @@ def main(argv=None):
                      ("shot", cmd_shot), ("compare", cmd_compare), ("run", cmd_run),
                      ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
                      ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match),
-                     ("identify", cmd_identify)):
+                     ("identify", cmd_identify), ("status", cmd_status), ("metrics", cmd_metrics), ("backfill", cmd_backfill),
+                     ("selftest", cmd_selftest)):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
         p.add_argument("--game")
@@ -334,6 +414,12 @@ def main(argv=None):
         p.add_argument("--emissive", action="store_true", help="albedo preview: base color also drives emissive")
         p.add_argument("--cmd")
         p.add_argument("--ticks", type=int, default=900)
+        p.add_argument("--json", action="store_true", help="status: machine-readable output")
+        p.add_argument("--shot", help="metrics: screenshot to compare (path, or a name under shots/)")
+        p.add_argument("--from", dest="from_step", help="run: first step to run")
+        p.add_argument("--to", dest="to_step", help="run: last step to run")
+        p.add_argument("--force", action="store_true", help="run: re-run steps whose artifacts already exist")
+        p.add_argument("--write", action="store_true", help="backfill: actually write case.json")
         p.set_defaults(fn=fn)
     a = ap.parse_args(argv)
     return a.fn(a)

@@ -80,6 +80,15 @@
 | 工具 | 类型 | 状态 | 接入方式 | 许可证 | 最近更新 | 版本 | 要点 |
 |---|---|---|---|---|---|---|---|
 | RenderForge screenshot / compare harness | renderforge-core | OK | direct | - | - | - | UE: game-mode HighResShot off-screen. Unity: camera render in the import method. Comparison is side-by-side, not a pixel metric yet. |
+| RenderForge numeric comparison (SSIM / error / coverage) | renderforge-core | OK | direct | - | - | - | Approximate same-viewpoint comparison, not pixel-identical. SSIM on BT.601 luminance (integral images), MAE/RMSE/p95, foreground-coverage error, mask IoU. ~1.1 s per 1080p pair. |
+| RenderForge offline regression fixture | renderforge-core | OK | direct | - | - | - | No GPU / RenderDoc / UE / Unity needed; covers committed fixtures only. Exit 1 on failure. |
+
+## orchestrate — L8 Registry, game profiles, recipes, planner, skills
+
+| 工具 | 类型 | 状态 | 接入方式 | 许可证 | 最近更新 | 版本 | 要点 |
+|---|---|---|---|---|---|---|---|
+| RenderForge workbench (case status + resumable step graph) | renderforge-core | OK | direct | - | - | - | A stage is done only when its artifact exists on disk; a recorded import is cross-checked against the engine project. Steps that need input not on disk (identify index, capture path) are skipped with the reason. Build options that change the result (extra_export/extra_pass) persist in case.json and are reused on rebuild. |
+| RenderForge MCP server (stdio) + background jobs | renderforge-core | OK | direct | - | - | - | Standard library only; tools are thin wrappers over the CLI so output is identical. job_start writes workspace/_jobs/<id>.log plus an exit marker, so a later session can still read the outcome. Not yet exercised from a fresh Claude session through the harness. |
 
 ## 游戏适配档案
 

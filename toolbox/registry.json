@@ -766,6 +766,71 @@
     "same RenderDoc scene rendered with correct camera in both engines"
    ],
    "notes": "Handles axis permutation + unit scale, instance matrices, normals, camera. Winding is preserved (both are left-handed). UV V-flip is done by the Unity emitter only."
+  },
+  {
+   "id": "rf-workbench",
+   "name": "RenderForge workbench (case status + resumable step graph)",
+   "layer": "orchestrate",
+   "kind": "renderforge-core",
+   "interfaces": [
+    "python -m renderforge status [case] [--json]",
+    "python -m renderforge run <case> [--from S] [--to S] [--force]",
+    "python -m renderforge backfill [--write]"
+   ],
+   "status": "verified-here",
+   "integration": "direct",
+   "evidence": [
+    "workspace/*/case.json: every case carries steps.<name> (time, numbers) after run",
+    "wuwa_f3422: stale UE import detected by cross-checking the UE project, re-imported and re-shot",
+    "wuwa_f3765: 19-draw legacy case taken from export to metrics in one `run` (39 s)"
+   ],
+   "notes": "A stage is done only when its artifact exists on disk; a recorded import is cross-checked against the engine project. Steps that need input not on disk (identify index, capture path) are skipped with the reason. Build options that change the result (extra_export/extra_pass) persist in case.json and are reused on rebuild."
+  },
+  {
+   "id": "rf-metrics",
+   "name": "RenderForge numeric comparison (SSIM / error / coverage)",
+   "layer": "validate",
+   "kind": "renderforge-core",
+   "interfaces": [
+    "python -m renderforge metrics <case> [--shot <png>]"
+   ],
+   "status": "verified-here",
+   "integration": "direct",
+   "evidence": [
+    "workspace/*/metrics.json for wuwa_bridge (UE 0.322 / Unity 0.349 SSIM), wuwa_61250 (0.393), wuwa_f3765 (0.533), zzz_frame01 (0.212)",
+    "orientation detection flips zzz_frame01 (stored bottom-up) and leaves the others as-is"
+   ],
+   "notes": "Approximate same-viewpoint comparison, not pixel-identical. SSIM on BT.601 luminance (integral images), MAE/RMSE/p95, foreground-coverage error, mask IoU. ~1.1 s per 1080p pair."
+  },
+  {
+   "id": "rf-selftest",
+   "name": "RenderForge offline regression fixture",
+   "layer": "validate",
+   "kind": "renderforge-core",
+   "interfaces": [
+    "python -m renderforge selftest"
+   ],
+   "status": "verified-here",
+   "integration": "direct",
+   "evidence": [
+    "6 checks in ~4 s: space round-trip (0 vertex error), Unity ingest vs localToWorldMatrix (1.6e-7), scene integrity, metrics self-consistency + flip, case scan, toolbox data"
+   ],
+   "notes": "No GPU / RenderDoc / UE / Unity needed; covers committed fixtures only. Exit 1 on failure."
+  },
+  {
+   "id": "rf-mcp",
+   "name": "RenderForge MCP server (stdio) + background jobs",
+   "layer": "orchestrate",
+   "kind": "renderforge-core",
+   "interfaces": [
+    "python -m renderforge.mcp_server (server `renderforge` in .mcp.json)"
+   ],
+   "status": "verified-here",
+   "integration": "direct",
+   "evidence": [
+    "scripted stdio client: doctor/plan/games/status/metrics/step/job_start/job_status/job_log all returned JSON; job_start ran a full case in the background (39 s, exit 0)"
+   ],
+   "notes": "Standard library only; tools are thin wrappers over the CLI so output is identical. job_start writes workspace/_jobs/<id>.log plus an exit marker, so a later session can still read the outcome. Not yet exercised from a fresh Claude session through the harness."
   }
  ]
 }

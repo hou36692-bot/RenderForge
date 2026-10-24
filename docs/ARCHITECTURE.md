@@ -24,7 +24,43 @@ Agent 先看 `doctor`（本机有什么）和 `plan`（这个游戏 + 这种输�
         │ Unity 6 (batchmode C#)           │   │ 对话式改场景                  │   │ 并排对比  │
         └──────────────────────────────────┘   └──────────────────────────────┘   └───────────┘
         L8 编排：toolbox/registry.json · games.json · recipes.json · CLI(doctor/plan/docs) · CLAUDE.md · 用户已有 skills
+           工作台：caseinfo(status) → pipeline(run) → metrics/selftest → mcp_server/jobs
 ```
+
+## 工作台：案例状态 → 步骤图 → 验证 → Agent 接口
+
+```
+caseinfo（案例状态，status） → pipeline（步骤图，run） → metrics / selftest（验证） → mcp_server / jobs（Agent 接口）
+```
+
+- **`caseinfo`**（`python -m renderforge status [case] [--json]`）：扫描 `workspace/<case>/`，来源（`rdc` / `3dmigoto` / `unity-bundle`）由 `case.json` 或 export 推断；阶段固定为
+  `survey, export, build, identify, emit-ue, emit-unity, shot, metrics`，每一项只按磁盘产物判断。单案例详情给出 draw/mesh/instance 数、身份覆盖、build 跳过数，并给出一条可执行的 next 命令。
+- **`pipeline`**（`python -m renderforge run <case> [--from S] [--to S] [--force]`）：步骤顺序随来源变化——rdc：survey → export → build → identify →（发射半段）；
+  3dmigoto：build-model → identify →（发射半段）；unity-bundle：ingest-unity →（发射半段）。发射半段看 `case.json -> target`（默认 unreal）：
+  unreal = emit-ue → shot → metrics；unity = emit-unity → metrics（Unity 导入脚本自己写 PNG，没有单独的 shot 步）。产物已存在的步骤跳过（shot 只认 `case.json -> steps.shot.file` 指向且仍在磁盘上的文件，旧截图不算）；
+  缺少输入的步骤（identify 的 `--index`、survey 的 `--rdc`）带原因跳过而不是终止；其余步骤失败即停止运行并打印 `--from` 续跑命令。
+  会改变结果的 build 选项（如 `--extra-export … --extra-pass translucent`）写进 `case.json -> build`，重建时复用，避免静默丢掉合并的透明 pass。
+- **`metrics`**（`python -m renderforge metrics <case> [--shot <png 路径>]` → `workspace/<case>/metrics.json` + `metrics_ssim.png`）：BT.601 亮度、8×8 均匀窗（积分图）的全局 SSIM，以及 MAE、RMSE、p95 绝对误差、
+  前景覆盖率误差、mask IoU；两图缩到较小尺寸，不放大。方向是测出来的（两种朝向都算，`shot_flipped` 报告真实朝向）。
+  默认给最新的引擎截图打分；UE 与 Unity 两张都在时，另一张的数字记在 `metrics.json -> also`，一次只坏一个引擎也能看出来。没有 `export/reference_backbuffer.png` 的案例无法打分。
+- **`selftest`**（`python -m renderforge selftest`）：6 项离线回归（空间往返、Unity 摄入 vs 引擎真值、WuWa 场景包完整性、metrics 自洽+翻转检测、案例扫描、toolbox 数据交叉引用），
+  约 4 s，不需要 GPU/RenderDoc/UE/Unity；失败退出码 1。
+- **`mcp_server`**（`python -m renderforge.mcp_server`，stdio，仅标准库）+ **`jobs`**：工具 `doctor, plan, games, status, run, step, metrics, job_start, job_status, job_log, jobs`；
+  每个工具返回 JSON 文本，异常以 `isError` 返回而不是让服务退出。刻意不提供通用 shell 工具。
+
+让这一层可信的两条规则：
+
+1. **done 指磁盘上真有产物，不是记录过的标志。** 引擎侧单独核对：`case.json` 记录导入成功、但
+   `ue_project/.../Content/RenderForge/<case>/Maps/Recon.umap` 或 `unity_project/.../Assets/RF/<case>/Recon.unity` 已不存在时，`status` 报 stale 并把 next 改成重新发射。
+   实际抓到过 `wuwa_f3422`：记录的 UE 导入已不在工程里，本会话重新导入并重拍。
+   `emit-ue` 按 `build/ue_import_result.json` 判断；`convert_scene` 在场景已是 UE 空间时直接返回 `build/`，所以结果落在那里；Unity 空间的场景会转写 `_scene_ue_space/`，
+   那种情况（如 `unity_synth`）`status` 看不到 `emit-ue`——它本来也只发射到 Unity，所以不影响 next。
+2. **步骤图不猜输入。** 每个成功步骤写 `case.json -> steps.<name>`（`{ok, when, run, …}`）；UE/Unity 发射与截图失败也写成 `ok: false` 并带日志路径。
+   其余步骤（survey/export/build/identify/metrics）出错时抛异常，`run` 停止并打印该步骤与 `--from` 续跑命令，异常文本在输出里、不在 `case.json`。
+   缺输入就带原因跳过，既不标成通过，也不连坐结束整个运行。
+
+`job_start` 起的是同一条 CLI 的后台进程（`renderforge.jobrun` → `cli.main`），日志与退出码落在 `workspace/_jobs/<id>.log` / `<id>.done.json`，
+所以后台与前台行为一致，且下一个会话（或别的 agent）不必持有进程句柄也能读到结果。
 
 ## 三类工具要分清
 

@@ -112,6 +112,9 @@ def scan(name, case_root=None):
                               ("draws", "drawsMatched", "instances", "instancesMatched", "uniqueSourceObjects")}
 
     ue = _json(d / "build" / "ue_import_result.json")
+    if not (ue and ue.get("ok")):
+        # a Unity-space scene is converted before import, so its result lands in _scene_ue_space/
+        ue = _json(d / "_scene_ue_space" / "ue_import_result.json")
     if ue and ue.get("ok"):
         stages["emit-ue"] = True
         detail["emit-ue"] = ue

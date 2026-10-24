@@ -67,12 +67,12 @@ backfill [--write]            为没有 case.json 的旧案例目录补写（内
 
 ```
 case         source     game      stages                                          draws    inst  next
-unity_synth  unity-bund generic-unity -survey -export +build -identify -emit-ue +emit-unity +shot -metrics              3  done
+unity_synth  unity-bund generic-unity -survey -export +build -identify +emit-ue +emit-unity +shot -metrics              3  done
 wuwa_61250   rdc        wuwa      +survey +export +build +identify +emit-ue +emit-unity +shot +metrics   1017   26944  done
 wuwa_bridge  rdc        wuwa      +survey +export +build +identify +emit-ue +emit-unity +shot +metrics    681   19192  done
 wuwa_f3422   rdc        wuwa      +survey +export +build +identify +emit-ue +emit-unity +shot +metrics   1718   19131  done
 wuwa_f3765   rdc        wuwa      +survey +export +build +identify +emit-ue +emit-unity +shot +metrics     19      19  done
-zzz_frame01  3dmigoto   zzz       -survey +export +build -identify -emit-ue +emit-unity +shot +metrics    213      58  done
+zzz_frame01  3dmigoto   zzz       +survey +export +build -identify +emit-ue +emit-unity +shot +metrics    213      58  done
 ```
 
 `+stage` 表示该阶段的产物已在磁盘上；`next` 是让这个案例往前走的那一步。`status` 会核对引擎工程：`case.json` 记了导入成功、但 UE 的

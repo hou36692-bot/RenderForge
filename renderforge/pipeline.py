@@ -347,6 +347,15 @@ def _graph(source):
     return rows
 
 
+def _ue_result(case):
+    """The UE import result; a Unity-space scene is converted first, so the result can also be under _scene_ue_space."""
+    for rel in ("build", "_scene_ue_space"):
+        p = _case_dir(case) / rel / "ue_import_result.json"
+        if p.exists():
+            return p
+    return None
+
+
 def _emit_graph(target):
     if target == "unity":
         return [("emit-unity", step_unity_import, ["unity_pkg/unity_import_result.json"]),
@@ -371,6 +380,8 @@ def _functions(case, target=None):
     for name, fn, writes in steps + _emit_graph(target or c.get("target") or "unreal"):
         if name == "shot":
             writes = [lambda: _shot_file(case)]
+        elif name == "emit-ue":
+            writes = [lambda: _ue_result(case)]
         out.append((name, fn, writes))
     return out
 
@@ -414,7 +425,7 @@ def run(case, frm=None, to=None, force=False, target=None, **kw):
             continue
         missing = _inputs(case, name, kw)
         if missing:
-            out["skipped"].append({"step": name, "why": f"needs {missing}; pass it to run this step"})
+            out["skipped"].append({"step": name, "why": f"needs {missing}"})
             continue
         try:
             res = fn(case, **kw)
@@ -433,7 +444,10 @@ def _inputs(case, name, kw):
         return "" if need else "--index <SourceProbe dump-index dir>"
     if name == "survey":
         return "" if (kw.get("rdc") or c.get("rdc")) else "--rdc <file.rdc>"
-    if name in ("export", "build", "ue-import", "shot", "metrics", "emit-ue", "emit-unity"):
+    if name == "metrics":
+        # a case built from a source package (no GPU capture) has no reference frame to score against
+        return "" if (_case_dir(case) / "export" / "reference_backbuffer.png").exists() else "a captured reference frame"
+    if name in ("export", "build", "ue-import", "shot", "emit-ue", "emit-unity"):
         return ""
     if name == "ingest-3dmigoto":
         return "" if (kw.get("frame_dir") or c.get("frame_dir")) else "--frame-dir <FrameAnalysis-...>"

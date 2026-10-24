@@ -53,8 +53,8 @@ caseinfo（案例状态，status） → pipeline（步骤图，run） → metric
 1. **done 指磁盘上真有产物，不是记录过的标志。** 引擎侧单独核对：`case.json` 记录导入成功、但
    `ue_project/.../Content/RenderForge/<case>/Maps/Recon.umap` 或 `unity_project/.../Assets/RF/<case>/Recon.unity` 已不存在时，`status` 报 stale 并把 next 改成重新发射。
    实际抓到过 `wuwa_f3422`：记录的 UE 导入已不在工程里，本会话重新导入并重拍。
-   `emit-ue` 按 `build/ue_import_result.json` 判断；`convert_scene` 在场景已是 UE 空间时直接返回 `build/`，所以结果落在那里；Unity 空间的场景会转写 `_scene_ue_space/`，
-   那种情况（如 `unity_synth`）`status` 看不到 `emit-ue`——它本来也只发射到 Unity，所以不影响 next。
+   `emit-ue` 的结果既可能在 `build/ue_import_result.json`（场景本来就是 UE 空间），也可能在 `_scene_ue_space/ue_import_result.json`
+   （场景先由 `convert_scene` 转成 UE 空间，如 `unity_synth`、`zzz_frame01`）；`status` 和 `pipeline` 两处都按这个顺序查。
 2. **步骤图不猜输入。** 每个成功步骤写 `case.json -> steps.<name>`（`{ok, when, run, …}`）；UE/Unity 发射与截图失败也写成 `ok: false` 并带日志路径。
    其余步骤（survey/export/build/identify/metrics）出错时抛异常，`run` 停止并打印该步骤与 `--from` 续跑命令，异常文本在输出里、不在 `case.json`。
    缺输入就带原因跳过，既不标成通过，也不连坐结束整个运行。

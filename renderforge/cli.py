@@ -191,7 +191,7 @@ def cmd_doctor(a):
 
 def cmd_plan(a):
     from .toolbox import plan
-    print(chr(10).join(plan(a.game, a.target)))
+    print(chr(10).join(plan(a.game, a.target or "unreal")))
     return 0
 
 
@@ -394,7 +394,7 @@ def main(argv=None):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
         p.add_argument("--game")
-        p.add_argument("--target", default="unreal")
+        p.add_argument("--target", help="target engine (default: the case's target, else unreal)")
         p.add_argument("--frame-dir")
         p.add_argument("--bundle")
         p.add_argument("--fingerprints")

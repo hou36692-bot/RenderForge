@@ -58,6 +58,7 @@ L8 编排         ████████░░ 80%  registry/games/recipes/doc
   `run wuwa_f3422 --from shot`（重新导入后）；`run --from build --force` 端到端。留档的作业日志是最后一次 `run wuwa_f3765 --from build --force`：
   `workspace/_jobs/20261024-221351-007c7b.log` 显示 build → emit-ue → shot → metrics 全成功、exit 0、39 s。
 - ⚠ 边界：`run` 当前覆盖 RenderDoc / 3DMigoto / Unity 源三条步骤图，但**不会交互式选择场景 pass**——它按 survey 自动选“类 G-buffer”的 pass；要别的 pass 仍需显式 `export --range/--eids`。
+- `metrics` 在 `metrics.json -> also` 里同时记录两个引擎的分数（默认主分数取最新截图）；没有截帧参考的案例（`unity_synth`）无法打分。
 
 **阶段 C（扩展）**
 - D3D12 / Vulkan 截帧验证；Nsight / PIX 作为 RenderDoc 抓不到时的后备评估

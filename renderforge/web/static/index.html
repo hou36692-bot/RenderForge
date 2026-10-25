@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RenderForge 工作台</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">RF</span>
+    <div>
+      <h1>RenderForge</h1>
+      <p class="sub">截帧 → 场景 → 引擎</p>
+    </div>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-view="overview" class="active">任务总览</button>
+    <button data-view="flow">工作流</button>
+    <button data-view="assets">资源浏览器</button>
+    <button data-view="result">场景结果</button>
+  </nav>
+  <div class="status-line">
+    <span id="conn" class="dot" title="与本地服务连接状态"></span>
+    <span id="conn-text">连接中…</span>
+    <button id="refresh" class="ghost" title="刷新">刷新</button>
+  </div>
+</header>
+
+<main>
+  <!-- 任务总览 -->
+  <section id="view-overview" class="view active">
+    <div class="split">
+      <aside class="cases" id="case-list"></aside>
+      <div class="pane" id="case-main">
+        <div class="placeholder">从左侧选择一个案例</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 工作流 -->
+  <section id="view-flow" class="view">
+    <div class="flow-head">
+      <h2 id="flow-title">工作流</h2>
+      <div class="flow-actions">
+        <select id="flow-target" title="目标引擎">
+          <option value="unreal">Unreal</option>
+          <option value="unity">Unity</option>
+        </select>
+        <button id="run-all" class="primary">运行整条流程</button>
+      </div>
+    </div>
+    <div id="flow-steps" class="flow-steps"></div>
+    <div class="flow-jobs">
+      <h3>该案例的作业</h3>
+      <div id="flow-jobs-list"></div>
+    </div>
+  </section>
+
+  <!-- 资源浏览器 -->
+  <section id="view-assets" class="view">
+    <div class="assets-head">
+      <h2>资源浏览器</h2>
+      <div class="assets-filters">
+        <input id="asset-search" type="search" placeholder="按源资产名或 id 过滤…">
+        <div class="seg" id="asset-kind">
+          <button data-kind="meshes" class="active">模型</button>
+          <button data-kind="textures">纹理</button>
+          <button data-kind="materials">材质</button>
+        </div>
+      </div>
+    </div>
+    <div class="assets-body">
+      <aside class="groups" id="asset-groups"></aside>
+      <div class="grid" id="asset-grid"></div>
+    </div>
+  </section>
+
+  <!-- 场景结果 -->
+  <section id="view-result" class="view">
+    <div class="result-head">
+      <h2>场景结果</h2>
+      <div class="result-actions">
+        <button id="btn-metrics" class="primary">重新计算指标</button>
+      </div>
+    </div>
+    <div class="result-body">
+      <div class="shots" id="result-shots"></div>
+      <div class="report" id="result-report"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>

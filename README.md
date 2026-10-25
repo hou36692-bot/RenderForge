@@ -56,6 +56,27 @@ ingest-unity <case> --bundle <file>
 读 PS 反汇编确认贴图语义：`shaders <case> --eids 2037,2263`（`--vs` 切到顶点着色器），
 或 `run <case> --from shaders --eids …`；MCP 里是 `step` 带 `eids`。普通 `run` 不会跑它（需要显式 eid 列表，会带原因跳过）。
 
+## 可视化工作台（本地 Web）
+
+除了对话和命令行，还有一个本地的可视化界面：
+
+```
+.venv\Scripts\python.exe -m renderforge web            # http://127.0.0.1:8770/
+```
+
+四个页面，数据全部来自 `workspace/`（和 CLI 读的是同一份，不另存状态）：
+
+| 页面 | 内容 |
+|---|---|
+| 任务总览 | 每个案例的来源、阶段完成度、draw/网格/实例数、VP 拟合、身份覆盖率、下一步；5 秒轮询刷新 |
+| 工作流 | 按来源展开的步骤图，每步显示产物是否存在、上次运行时间与关键结果（vp_match、drawsMatched、ssim…），可单独重跑或跑整条 |
+| 资源浏览器 | 按源资产名分组的模型（服务端用顶点自己渲染缩略图）、纹理、材质；可搜索、可分类 |
+| 场景结果 | 参考帧与各引擎截图、导入报告、SSIM/MAE/RMSE/p95/覆盖率/IoU、构建统计与诊断 |
+
+实现约束：只用标准库 `http.server` 与原生 JS，**没有前端框架、没有构建步骤**；长任务通过 `jobs.start` 起后台作业（和 MCP/CLI 同一条命令），页面轮询作业状态；`/file` 与 `/img` 只服务 `workspace/` 内的图片，`/img` 会缩放到 ≤1600 px（3840×2160 的参考帧直接给 `<img>` 会让离屏窗口干脆不绘制）。
+
+验收：`python scripts/dev/web_acceptance.py`（26 项，约 15 s），覆盖页面与静态资源、案例列表/阶段/指标与 CLI 的一致性、缩略图是真 PNG、路径越权被拒、未知步骤/案例被拒、作业能起能完成、6 个案例 × 5 个端点都能渲染。
+
 ## 工作台
 
 单步命令之外，有一层按案例工作、可续跑、能给出数字的入口（`.venv/Scripts/python.exe -m renderforge …`）：

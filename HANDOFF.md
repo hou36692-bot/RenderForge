@@ -104,7 +104,18 @@
 5. **收尾 MCP 会话级验收**：开一个全新 Claude 会话，只用 `renderforge` MCP 工具走 `doctor → plan → status → step(build) → metrics`；协议级已经过了，这一步验的是 Agent 在真实会话里会不会正确选工具。
 6. （参考）长期项：ZZZ 头/脸（GPU 驱动间接绘制）、蒙皮网格、D3D12/Vulkan、Nsight/PIX、编辑器控制（L6）。
 
-**不要做的事**：不要把工作台做成 Web UI；不要在没有实际跑过的情况下把新命令标成 OK；`docs/TOOLBOX.md` 只能由 `python -m renderforge docs` 生成；`case.json` 里的 `steps` 由步骤图写，不要手改成“ok”来绕过一次失败；不要手调灯光强度和曝光。
+**不要做的事**：（旧约定“不要把工作台做成 Web UI”已作废：用户明确要求本地可视化工作台，见 `renderforge/web/`；要求是**不复刻** Agent 已有的能力、不引入前端框架与构建步骤。）不要在没有实际跑过的情况下把新命令标成 OK；`docs/TOOLBOX.md` 只能由 `python -m renderforge docs` 生成；`case.json` 里的 `steps` 由步骤图写，不要手改成“ok”来绕过一次失败；不要手调灯光强度和曝光。
+
+## 可视化工作台（本地 Web，本会话新增）
+
+`renderforge/web/`：标准库 `ThreadingHTTPServer` + 原生 JS，无框架无构建。启动 `python -m renderforge web`（默认 `127.0.0.1:8770`）。
+
+- `server.py`：所有响应都由 `workspace/` 经 `caseinfo.scan` / `pipeline.plan_steps` / `jobs.*` / `metrics` 派生，**不保存自己的状态**；页面与 CLI 不一致就是这里的 bug。
+- 端点：`/api/cases`、`/api/case/<n>[/steps|/assets|/report|/metrics|/jobs]`、`/api/jobs[/<id>[/log]]`、`/api/thumb/mesh`、`/img`、`/file`、`POST /api/case/<n>/{run,metrics}`。
+- 安全边界：只允许 `RUNNABLE` 里列出的步骤；`/file` 与 `/img` 拒绝 `workspace/` 之外的路径；未知案例 404。
+- 缩略图：读 `pos.f32`/`idx.u32` 做正交投影 + 平面着色（`abs(dot(N,L))`，因为捕获几何没有可信绕序），采样上限 1200 三角形，按 (case, mesh, size) 缓存。实测 40k 顶点网格 0.19 s。
+- 踩过的坑：`aspect-ratio` 的缩略图放在 grid `auto` 行里高度会塌成 2 px，改用 `grid-auto-rows`；3840×2160 的参考帧直接给 `<img>` 会让离屏窗口不绘制，改走 `/img` 缩放到 1600 px。
+- 验收：`scripts/dev/web_acceptance.py`，26 项约 15 s，含与 CLI 的数值一致性、越权拒绝、作业生命周期、6×5 端点渲染。
 
 ## 快速上手
 ```

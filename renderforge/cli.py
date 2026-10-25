@@ -19,6 +19,7 @@ Workbench commands:
   metrics <case> [--shot name.png]    SSIM / MAE / coverage against export/reference_backbuffer.png
   backfill [--write]                  write case.json for legacy case directories from what the files prove
   selftest                            offline regression checks on committed fixtures (no GPU / engine needed)
+  web [--port 8770] [--host 127.0.0.1]  local visual workbench in a browser (stdlib http.server, no build step)
 
 RenderDoc route, per case:  survey -> export -> build -> ue-import -> shot
 
@@ -376,6 +377,12 @@ def cmd_metrics(a):
     return 0
 
 
+def cmd_web(a):
+    """Start the local workbench. Blocks until Ctrl-C; prints the URL to open."""
+    from .web.server import serve
+    return serve(a.host or "127.0.0.1", a.port or 8770)
+
+
 def cmd_selftest(a):
     from .selftest import run
     res = run(verbose=True)
@@ -402,7 +409,7 @@ def main(argv=None):
                      ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
                      ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match),
                      ("identify", cmd_identify), ("status", cmd_status), ("metrics", cmd_metrics), ("backfill", cmd_backfill), ("shaders", cmd_shaders),
-                     ("selftest", cmd_selftest)):
+                     ("selftest", cmd_selftest), ("web", cmd_web)):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
         p.add_argument("--game")
@@ -434,6 +441,8 @@ def main(argv=None):
         p.add_argument("--to", dest="to_step", help="run: last step to run")
         p.add_argument("--force", action="store_true", help="run: re-run steps whose artifacts already exist")
         p.add_argument("--write", action="store_true", help="backfill: actually write case.json")
+        p.add_argument("--port", type=int, default=8770, help="web: port for the local workbench")
+        p.add_argument("--host", default="127.0.0.1", help="web: bind address (127.0.0.1 keeps it local)")
         p.set_defaults(fn=fn)
     a = ap.parse_args(argv)
     return a.fn(a)

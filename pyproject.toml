@@ -6,4 +6,7 @@ requires-python = ">=3.12"
 dependencies = ["numpy", "pillow"]
 
 [tool.setuptools]
-packages = ["renderforge"]
+packages = ["renderforge", "renderforge.web", "renderforge.adapters"]
+
+[tool.setuptools.package-data]
+"renderforge.web" = ["static/*"]

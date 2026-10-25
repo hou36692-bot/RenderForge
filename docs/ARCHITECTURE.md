@@ -27,6 +27,9 @@ Agent 先看 `doctor`（本机有什么）和 `plan`（这个游戏 + 这种输�
            工作台：caseinfo(status) → pipeline(run) → metrics/selftest → mcp_server/jobs
 ```
 
+（图里没画出的两个组件：L1 的 `rf_extract.py shaders` 模式——反汇编读材质语义；以及 L1/L3 之间的
+`renderforge/adapters/<game>.py`——每游戏的世界放置/相机解码，见下文。）
+
 ## 工作台：案例状态 → 步骤图 → 验证 → Agent 接口
 
 ```
@@ -34,11 +37,11 @@ caseinfo（案例状态，status） → pipeline（步骤图，run） → metric
 ```
 
 - **`caseinfo`**（`python -m renderforge status [case] [--json]`）：扫描 `workspace/<case>/`，来源（`rdc` / `3dmigoto` / `unity-bundle`）由 `case.json` 或 export 推断；阶段固定为
-  `survey, export, build, identify, emit-ue, emit-unity, shot, metrics`，每一项只按磁盘产物判断。单案例详情给出 draw/mesh/instance 数、身份覆盖、build 跳过数，并给出一条可执行的 next 命令。
-- **`pipeline`**（`python -m renderforge run <case> [--from S] [--to S] [--force]`）：步骤顺序随来源变化——rdc：survey → export → build → identify →（发射半段）；
+  `survey, export, build, identify, emit-ue, emit-unity, shot, metrics`（`shaders` 只经 `run`/MCP 单独调，不在这张表里），每一项只按磁盘产物判断。单案例详情给出 draw/mesh/instance 数、身份覆盖、build 跳过数，并给出一条可执行的 next 命令。
+- **`pipeline`**（`python -m renderforge run <case> [--from S] [--to S] [--force]`）：步骤顺序随来源变化——rdc：survey → export → build → identify → shaders（可选）→（发射半段）；
   3dmigoto：build-model → identify →（发射半段）；unity-bundle：ingest-unity →（发射半段）。发射半段看 `case.json -> target`（默认 unreal）：
   unreal = emit-ue → shot → metrics；unity = emit-unity → metrics（Unity 导入脚本自己写 PNG，没有单独的 shot 步）。产物已存在的步骤跳过（shot 只认 `case.json -> steps.shot.file` 指向且仍在磁盘上的文件，旧截图不算）；
-  缺少输入的步骤（identify 的 `--index`、survey 的 `--rdc`）带原因跳过而不是终止；其余步骤失败即停止运行并打印 `--from` 续跑命令。
+  缺少输入的步骤（identify 的 `--index`、survey 的 `--rdc`、shaders 的 `--eids`）带原因跳过而不是终止；其余步骤失败即停止运行并打印 `--from` 续跑命令。
   会改变结果的 build 选项（如 `--extra-export … --extra-pass translucent`）写进 `case.json -> build`，重建时复用，避免静默丢掉合并的透明 pass。
 - **`metrics`**（`python -m renderforge metrics <case> [--shot <png 路径>]` → `workspace/<case>/metrics.json` + `metrics_ssim.png`）：BT.601 亮度、8×8 均匀窗（积分图）的全局 SSIM，以及 MAE、RMSE、p95 绝对误差、
   前景覆盖率误差、mask IoU；两图缩到较小尺寸，不放大。方向是测出来的（两种朝向都算，`shot_flipped` 报告真实朝向）。
@@ -81,10 +84,22 @@ caseinfo（案例状态，status） → pipeline（步骤图，run） → metric
 
 加一个新来源或新目标，只需要写它到这两个格式之一的适配器，不碰其他环节。
 
+除了这两个 JSON 契约，摄入阶段还有一件独立的事：**读着色器**。`rd_scripts/rf_extract.py` 的 `shaders` 模式把指定 draw 的
+像素着色器（或 `vs: true` 时的顶点着色器）反汇编写进案例目录，用来回答“这个贴图槽位到底是底色、遮罩还是 ORM”这类问题——
+两个中立格式都不带材质语义，语义只能从反汇编 + 混合状态里读。它是个可选步骤：必须显式给 `--eids`，
+在步骤图里如果没有 eids 就带原因跳过。CLI 没有 `shaders` 子命令、`run` 也没有 `--eids` 参数，
+实际入口是 MCP 的 `step`（`job_start` 起的是 CLI 进程，同样调不到）或直接调 `pipeline.step_shaders`。
+
 ## 游戏适配档案（互不影响）
 
 `toolbox/games.json` 每个游戏一条：引擎、打包方式、可用截帧路线、可用解包器、`model_basis` 等放置参数、**已验证项和缺口**。
-档案只**选择**工具并记录事实；真正的游戏专用代码（如 ZZZ 的 VS 常量缓冲解码）将放在独立适配器模块里，不被其他游戏引用。
+档案只**选择**工具并记录事实；真正的游戏专用代码放在 `renderforge/adapters/`，一个游戏一个模块，共用同一组函数
+（`read_cbuffers` / `solve_view_proj` / `solve_world` / `apply`），**不被其他游戏引用**。
+
+目前只有一个：`renderforge/adapters/zzz.py`，从 ZZZ 的 VS 常量缓冲拿每 draw 世界矩阵（`vs-cb1[0..3]`）与相机
+（`vs-cb0[123..126]`）。它在矩阵层验证过（剪影 IoU 0.9783），但**还没接进 CLI**——`build`/`build-model` 没有 adapter 路径，
+`zzz_frame01` 出厂仍走 `build-model` 的单位放置。适配器写出的矩阵**不能再乘** `games.json` 的 `model_basis`
+（会让 IoU 从 0.978 掉到 0.552）。
 
 ## 许可证与密钥政策
 

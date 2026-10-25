@@ -12,6 +12,10 @@ Deterministic side effects, safe to repeat: `step build` regenerates workspace/w
 existing export, and the metrics calls rewrite workspace/wuwa_f3765/metrics.json; the CLI parity runs also bump
 `steps.metrics` in case.json (five fields are deterministic, only `when`/`run`/`seconds` move). The last CLI call
 leaves metrics.json in the CLI's canonical form, so a second run starts from the same state.
+
+What the build step would otherwise leave behind: a rebuild rewrites scene.json but not the artifacts emitted from
+the previous one, and `status` then correctly reports the emitters as stale. The run therefore re-emits whatever the
+case had before it started (recording `restore-emit-*` checks), so an acceptance run cannot make a case look broken.
 """
 import json
 import os
@@ -223,11 +227,18 @@ def run_checks(mcp):
     ok = not err and isinstance(nxt, dict) and "step" in nxt
     check("status-case", ok, f"next.step={nxt.get('step')!r} build vp_match={bld.get('vp_match')!r}")
 
-    # 5. build (rebuilds the 19-draw case from the same export)
+    # 5. build (rebuilds the 19-draw case from the same export). A rebuild rewrites scene.json but not the
+    # artifacts emitted from the previous one, so re-emit afterwards: an acceptance run must leave the case in
+    # the state it found it, and `status` would otherwise report emit-unity as stale purely because this ran.
+    before = (det or {}).get("stages") or {}
     b, err = mcp.tool("step", {"case": CASE, "step": "build"}, timeout=180)
     ok = not err and isinstance(b, dict) and "vp_match" in b
     check("step-build", ok, f"vp_match={b.get('vp_match')!r} meshes={b.get('meshes')} "
                             f"instances={b.get('instances')} report={b.get('report')}")
+    for stage, step in (("emit-ue", "ue-import"), ("emit-unity", "unity-import")):
+        if before.get(stage):
+            _, err = mcp.tool("step", {"case": CASE, "step": step}, timeout=600)
+            check(f"restore-{stage}", not err, f"re-emitted after the rebuild: {err or 'ok'}")
 
     # 6. metrics
     met, err = mcp.tool("metrics", {"case": CASE}, timeout=120)

@@ -12,6 +12,7 @@
 
 Workbench commands:
 
+  shaders <case> --eids a,b,c [--vs]  disassemble the unique pixel (or vertex) shaders of those draws
   status [case]                       every case: source, stages done, key numbers, inferred next step
   status --json                       the same, machine-readable
   run <case> [--from S --to S]        run the case's step graph, skipping steps whose artifacts exist
@@ -312,6 +313,7 @@ def cmd_run(a):
                        extra_export=a.extra_export, extra_pass=a.extra_pass,
                        max_instances=a.max_instances, cmd=a.cmd, ticks=a.ticks, index=a.index,
                        ids=a.ids, no_instanced_index=a.no_instanced_index, emissive=a.emissive,
+                       eids=a.eids, vs=a.vs,
                        max_extent=a.max_extent, min_tris=a.min_tris, bundle=a.bundle, frame_dir=a.frame_dir,
                        game=a.game)
     print(f"steps ran: {[r['step'] for r in res['ran']] or 'none'}")
@@ -324,6 +326,16 @@ def cmd_run(a):
         print(f"resume with: python -m renderforge run {a.case} --from {res['stopped']['step']}")
         return 1
     return 0
+
+
+def cmd_shaders(a):
+    from . import pipeline
+    if not a.eids and not a.vs:
+        print("shaders needs --eids <id,id,...> (the draw list to disassemble) or --vs")
+        return 1
+    res = pipeline.step_shaders(a.case, eids=a.eids, vs=a.vs)
+    print(f"shaders rc={res['rc']} unique={res['unique']} -> {res['out']}")
+    return 0 if res["rc"] == 0 else 1
 
 
 def cmd_status(a):
@@ -389,7 +401,7 @@ def main(argv=None):
                      ("shot", cmd_shot), ("compare", cmd_compare), ("run", cmd_run),
                      ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
                      ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match),
-                     ("identify", cmd_identify), ("status", cmd_status), ("metrics", cmd_metrics), ("backfill", cmd_backfill),
+                     ("identify", cmd_identify), ("status", cmd_status), ("metrics", cmd_metrics), ("backfill", cmd_backfill), ("shaders", cmd_shaders),
                      ("selftest", cmd_selftest)):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
@@ -416,6 +428,8 @@ def main(argv=None):
         p.add_argument("--ticks", type=int, default=900)
         p.add_argument("--json", action="store_true", help="status: machine-readable output")
         p.add_argument("--shot", help="metrics: screenshot to compare (path, or a name under shots/)")
+        p.add_argument("--eids", help="shaders: comma-separated draw event ids to disassemble")
+        p.add_argument("--vs", action="store_true", help="shaders: dump the vertex shader instead of the pixel shader")
         p.add_argument("--from", dest="from_step", help="run: first step to run")
         p.add_argument("--to", dest="to_step", help="run: last step to run")
         p.add_argument("--force", action="store_true", help="run: re-run steps whose artifacts already exist")

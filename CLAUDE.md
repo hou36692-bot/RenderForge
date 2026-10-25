@@ -7,6 +7,7 @@
 - `renderforge/` Python 包（`python -m renderforge …` 是主入口，见 `cli.py`）
 - `renderforge/rd_scripts/` 在 RenderDoc 内部跑的脚本（Py3.6，仅标准库）：`qrenderdoc.exe --python`
 - `renderforge/ue_scripts/` 在 UE 内部跑的脚本（Py3.11）
+- `renderforge/adapters/` 游戏专用适配器（目前 `zzz.py`）：一个游戏一个模块，同一组接口，不被其他游戏引用
 - `workspace/<case>/` 每个案例的生成物（survey/ export/ build/ shots/），git 忽略；**原始 .rdc 绝不复制/修改**
 - `ue_project/RenderForgeUE/` UE 目标工程（Content 是生成物，git 忽略）；已启用官方 MCP 插件
 - `unity_project/RenderForgeUnity/` Unity 目标工程（Assets/Editor 里是导入器与测试包构建；Library/Bundles 等生成物 git 忽略）
@@ -49,5 +50,12 @@
 - 无法用 local→clip 拟合的 billboard/粒子不要烘焙；`w` 正负混杂，除完是退化卡片。depth-only pass 与主 pass 是同一批植被代理，别合并。
 - UE 透明材质实例每次导入要删除重建（否则沿用旧父级）；无 alpha 的 BC1 粒子贴图改用亮度遮罩。
 - 水面：MI 链路（父级/混合模式/贴图）可在引擎内核实，但“截图里可见”必须单独验证。
+- **UE 离屏截图全黑，先怀疑自己手调的灯光/曝光**：曾经用 3 lux 平行光 + 后处理体积里倒置的 EV100/f-stop，截图 mean RGB (0,0,0)。
+  现在的规则是**从引擎默认开始**（标准平行光 + SkyAtmosphere + SkyLight，无后处理体积），一次只改一个可量化项，改完就截一张看。
+  “材质链路通了”不等于“画面上看得见”。
+- **捕获的网格可能没有可用 UV**：鸣潮水面 `m0517` 的顶点缓冲 SRV 解出 `u` 恒为 1.0（SNORM 通道只有 13 个近似 0 的 u 值，UNORM ch0 全 1.0），
+  材质对每个像素采样同一个 texel，整片渲成平色。平面看起来“材质坏了”时，先查 `has_uv` 与 UV 数值分布，再动材质。
+- **贴图语义要从着色器读，不要从贴图长得像什么推断**：`rd_scripts/rf_extract.py` 有 `shaders` 模式（反汇编指定 draw 的 PS，`vs: true` 切 VS），
+  必须显式给 eids，入口是 MCP 的 `step` 或直接调 `pipeline.step_shaders`（CLI 没有 `shaders` 子命令，`run` 也没有 `--eids`）。靠它确认了 WuWa 的“ORM”贴图其实是色调伴随贴图。
 
 ## 已知限制 / 待办见 ROADMAP.md

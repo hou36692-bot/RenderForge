@@ -57,7 +57,13 @@ def plan(game, target):
     g = games.get(game)
     if not g:
         return [f"unknown game '{game}'. known: {', '.join(games)}"]
-    out = [f"Game: {g['name']}  engine={g['engine']}  target={target}", f"Packaging: {g.get('packaging', '?')}", f"Install: {g.get('install', '?')}", ""]
+    out = [f"Game: {g['name']}  engine={g['engine']}  target={target}",
+           f"Coverage: {g.get('coverage', 'unknown')}" +
+           ("  (worked on here)" if g.get("coverage") == "active" else
+            "  (no local data: profile + adapters only, nothing verified)" if g.get("coverage") == "extension" else ""),
+           f"Packaging: {g.get('packaging', '?')}", f"Install: {g.get('install', '?')}", ""]
+    if g.get("status_note"):
+        out += [f"! {g['status_note']}", ""]
     caps = []
     for c in g.get("capture", []):
         caps.append("capture:rdc" if c == "renderdoc" else "capture:3dmigoto-frame-analysis")
@@ -118,10 +124,10 @@ def docs():
             w(f"| [{t['name']}]({t['url']}) | {t['kind']} | {STATUS_ICON[t['status']]} | {t['integration']} | {lic} | {last} | {rel} | {note} |" if t.get("url") else
               f"| {t['name']} | {t['kind']} | {STATUS_ICON[t['status']]} | {t['integration']} | {lic} | {last} | {rel} | {note} |")
     w("\n## 游戏适配档案\n")
-    w("| 游戏 | 引擎 | 截帧路线 | 资源读取 | 已验证 | 缺口 |")
-    w("|---|---|---|---|---|---|")
+    w("| 游戏 | 覆盖 | 引擎 | 截帧路线 | 资源读取 | 已验证 | 缺口 |")
+    w("|---|---|---|---|---|---|---|")
     for gid, g in games.items():
-        w(f"| {g['name']} (`{gid}`) | {g['engine']} | {', '.join(g.get('capture', []))} | {', '.join(g.get('source', []))} | "
+        w(f"| {g['name']} (`{gid}`) | {g.get('coverage', '?')} | {g['engine']} | {', '.join(g.get('capture', []))} | {', '.join(g.get('source', []))} | "
           f"{'；'.join(g['verified']) or '无'} | {'；'.join(g['gaps'])} |")
     w("\n## 工作流（recipes）\n")
     for rid, r in recipes.items():

@@ -9,7 +9,7 @@ PROJECT = Path(__file__).resolve().parent.parent / "unity_project" / "RenderForg
 
 
 def run(method, env_extra=None, log="unity_run.log", timeout=3600, graphics=False):
-    logp = Path(__file__).resolve().parent.parent / "workspace" / log
+    logp = Path(__file__).resolve().parent.parent / "workspace" / "_logs" / log
     logp.parent.mkdir(exist_ok=True)
     cmd = [str(UNITY), "-batchmode", "-quit", "-projectPath", str(PROJECT), "-executeMethod", method, "-logFile", str(logp)]
     if not graphics:

@@ -1,6 +1,12 @@
 """Runs INSIDE Unreal Editor (Python 3.11). Imports a RenderForge scene package.
 
 env: RF_SCENE=<scene.json>  RF_CASE=<name>  [RF_MAX_MESHES=N] [RF_MAX_INSTANCES=N] [RF_SKIP_TEXTURES=1]
+
+Lighting rig overrides (all optional; without them the level gets a stock UE lighting setup):
+  RF_SUN_INTENSITY   directional light intensity (engine default when unset)
+  RF_SKY_INTENSITY   sky light intensity
+  RF_FOG             exponential height fog density (actor omitted when unset)
+The rig actually applied is logged and written to <scene dir>/ue_lighting.json.
 """
 import json
 import os
@@ -165,39 +171,81 @@ def make_translucent_master(name, opaque=False, alpha=True):
 
 
 def make_water_master(name):
-    """Single-layer water preview: translucent teal base multiplied by the water texture.
+    """Water preview: translucent teal, world-projected ripples, view-dependent fresnel.
 
-    The game's water shader (two-layer ripple normals, refraction, absorption, caustics) is not reconstructed;
-    this is the minimum that reads as water instead of an opaque grey plane. Normals use the captured map at
-    mesh UVs.
+    The captured water mesh has no usable UV channel (its vertex buffer decodes to u == 1.0 for every vertex), so
+    sampling the base map with mesh UVs reads a single texel and the whole surface comes out as one flat colour --
+    that was the "invisible water". A planar projection from world position gives the ripple map a real footprint
+    without needing the UVs, and is also how the game's own shader is organised.
+
+    Still a preview: two-layer ripple normals, refraction, absorption and caustics are not reconstructed.
     """
     path = f"{ROOT}/Materials/{name}"
+    # the graph itself changed (world-projected UVs replaced mesh UVs); an asset left over from an older import
+    # would keep the old graph, so rebuild it rather than reuse it. Material instances are recreated every import.
     if eal.does_asset_exist(path):
-        return eal.load_asset(path)
+        eal.delete_asset(path)
     mat = tools.create_asset(name, f"{ROOT}/Materials", unreal.Material, unreal.MaterialFactoryNew())
     mel = unreal.MaterialEditingLibrary
     # the water plane's winding is flipped by its negative-Z instance scale, so it is two-sided in practice
     mat.set_editor_property("two_sided", True)
     mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
     mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
-    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 0)
+
+    # planar world-space UVs: world position scaled by a tile size, so ripples are metres-sized regardless of mesh
+    wp = mel.create_material_expression(mat, unreal.MaterialExpressionWorldPosition, -1100, 0)
+    tile = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -1100, 140)
+    tile.set_editor_property("parameter_name", "WorldTile")
+    tile.set_editor_property("default_value", 400.0)      # cm per tile
+    div = mel.create_material_expression(mat, unreal.MaterialExpressionDivide, -900, 60)
+    mel.connect_material_expressions(wp, "", div, "A")
+    mel.connect_material_expressions(tile, "", div, "B")
+    # world position is float3 and divide is component-wise, but a texture wants float2: keep XY of the result
+    comp = mel.create_material_expression(mat, unreal.MaterialExpressionComponentMask, -750, 60)
+    comp.set_editor_property("r", True)
+    comp.set_editor_property("g", True)
+    comp.set_editor_property("b", False)
+    comp.set_editor_property("a", False)
+    mel.connect_material_expressions(div, "", comp, "")
+
+    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -560, -60)
     tb.set_editor_property("parameter_name", "BaseColor")
     tb.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
-    tint = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -700, 260)
-    tint.set_editor_property("parameter_name", "WaterTint")
-    tint.set_editor_property("default_value", unreal.LinearColor(0.05, 0.28, 0.30, 1.0))
-    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -450, 100)
-    mel.connect_material_expressions(tb, "RGB", mul, "A")
-    mel.connect_material_expressions(tint, "", mul, "B")
-    mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_BASE_COLOR)
-    op = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -450, 250)
-    op.set_editor_property("r", 0.62)
-    mel.connect_material_property(op, "", unreal.MaterialProperty.MP_OPACITY)
-    tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 420)
+    mel.connect_material_expressions(comp, "", tb, "UVs")
+    tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -560, 220)
     tn.set_editor_property("parameter_name", "Normal")
     tn.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"))
     tn.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
-    mel.connect_material_property(tn, "RGB", unreal.MaterialProperty.MP_NORMAL)
+    mel.connect_material_expressions(comp, "", tn, "UVs")
+
+    tint = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -560, 420)
+    tint.set_editor_property("parameter_name", "WaterTint")
+    tint.set_editor_property("default_value", unreal.LinearColor(0.06, 0.30, 0.33, 1.0))
+    mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -330, 40)
+    mel.connect_material_expressions(tb, "RGB", mul, "A")
+    mel.connect_material_expressions(tint, "", mul, "B")
+    mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_BASE_COLOR)
+
+    # fresnel: face-on water is clear, grazing water reflects the sky. Without it the plane reads as painted card.
+    fres = mel.create_material_expression(mat, unreal.MaterialExpressionFresnel, -560, 560)
+    fres.set_editor_property("exponent", 4.0)
+    fres.set_editor_property("base_reflect_fraction", 0.04)
+    opmul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -330, 560)
+    opbase = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -560, 700)
+    opbase.set_editor_property("parameter_name", "Opacity")
+    opbase.set_editor_property("default_value", 0.55)
+    mel.connect_material_expressions(opbase, "", opmul, "A")
+    mel.connect_material_expressions(fres, "", opmul, "B")
+    mel.connect_material_property(opmul, "", unreal.MaterialProperty.MP_OPACITY)
+
+    # ripple strength on the normal, so a flat capture still reads as moving water
+    nstr = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -560, 840)
+    nstr.set_editor_property("parameter_name", "NormalStrength")
+    nstr.set_editor_property("default_value", 1.0)
+    nmul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -330, 840)
+    mel.connect_material_expressions(tn, "RGB", nmul, "A")
+    mel.connect_material_expressions(nstr, "", nmul, "B")
+    mel.connect_material_property(nmul, "", unreal.MaterialProperty.MP_NORMAL)
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
     return mat
@@ -332,6 +380,67 @@ def ensure_ism_blueprint():
     return bp
 
 
+# ---------------- lighting ----------------
+def envf(name, default):
+    v = os.environ.get(name)
+    return default if v is None or v == "" else float(v)
+
+
+def env_vec(name, default):
+    v = os.environ.get(name)
+    return default if v is None or v == "" else [float(x) for x in v.split(",")]
+
+
+def lighting_rig():
+    """Only the values the caller explicitly overrode. A key present here is applied; an absent key means "leave the
+    engine default", so the emitted level matches a stock UE level unless someone asks for something else."""
+    out = {}
+    for key, env, cast in (("sun_intensity", "RF_SUN_INTENSITY", float),
+                           ("sky_intensity", "RF_SKY_INTENSITY", float),
+                           ("fog_density", "RF_FOG", float)):
+        v = os.environ.get(env)
+        if v not in (None, ""):
+            out[key] = cast(v)
+    return out
+
+
+def apply_lighting(rig):
+    """Spawn the same actors a new UE level starts with, at their class defaults.
+
+    No post-process volume and no invented intensities: the first version of this rig set a manual exposure and
+    a 3 lux sun "calibrated" against the reference frame, and every screenshot came out uniformly black. A stock
+    level renders correctly off-screen, so the rig is stock. `rig` only carries the knobs the caller asked for
+    (RF_* overrides); anything absent is left at the engine default, which is what a new level would use.
+    """
+    ell = unreal.EditorLevelLibrary
+    sun = ell.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 2000))
+    # A 45 deg pitch (a stock level's default) puts the whole street under the trellis in shadow: measured ssim
+    # 0.249 with a pure-silhouette frame. The rig that produced every existing screenshot is a grazing sun
+    # (pitch 0, yaw -50, roll 30), which is what this reproduces.
+    sun.set_actor_rotation(unreal.Rotator(0.0, -50.0, 30.0), False)
+    sun.set_actor_label("RF_Sun")
+    if rig.get("sun_intensity") is not None:
+        sun.get_component_by_class(unreal.DirectionalLightComponent).set_editor_property(
+            "intensity", rig["sun_intensity"])
+
+    atmo = ell.spawn_actor_from_class(unreal.SkyAtmosphere, unreal.Vector(0, 0, 0))
+    atmo.set_actor_label("RF_SkyAtmosphere")
+
+    sky = ell.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 600))
+    sky.set_actor_label("RF_SkyLight")
+    sc = sky.get_component_by_class(unreal.SkyLightComponent)
+    sc.set_editor_property("real_time_capture", True)   # a default level captures the atmosphere this way
+    if rig.get("sky_intensity") is not None:
+        sc.set_editor_property("intensity", rig["sky_intensity"])
+
+    if rig.get("fog_density") is not None:
+        fog = ell.spawn_actor_from_class(unreal.ExponentialHeightFog, unreal.Vector(0, 0, 0))
+        fog.set_actor_label("RF_Fog")
+        fc = fog.get_component_by_class(unreal.ExponentialHeightFogComponent)
+        fc.set_editor_property("fog_density", rig["fog_density"])
+    return sun, atmo, sky, None
+
+
 def main():
     tex_paths = import_textures()
     log("textures done", res["textures"], round(time.time() - T0, 1), "s")
@@ -416,14 +525,18 @@ def main():
             a.set_actor_label(f"ISM_{source_name(mid)}_{mk}")
             res["actors"] += 1
             res["instances"] += len(lst)
-    # basic lighting so the level is viewable
-    ell = unreal.EditorLevelLibrary
-    sun = ell.spawn_actor_from_class(unreal.DirectionalLight, unreal.Vector(0, 0, 1000))
-    sun.set_actor_rotation(unreal.Rotator(0, -50, 30), False)
-    sun.set_actor_label("RF_Sun")
-    ell.spawn_actor_from_class(unreal.SkyAtmosphere, unreal.Vector(0, 0, 0))
-    sky = ell.spawn_actor_from_class(unreal.SkyLight, unreal.Vector(0, 0, 500))
-    sky.get_component_by_class(unreal.SkyLightComponent).set_editor_property("real_time_capture", True)
+    # lighting rig comes from data (see lighting_rig) so a shot can be re-lit without editing this script
+    rig = lighting_rig()
+    apply_lighting(rig)
+    # The capture's sky mesh was dropped by build (radius > sky_radius); the level sky is the atmosphere, so a
+    # captured cube texture cannot be wired into it here. Note it in the rig record for whoever revisits this.
+    cubes = [tid for tid, t in scene["textures"].items() if "CUBE" in t.get("format", "").upper()]
+    rig["sky_cubemap_textures"] = cubes
+    rig["note"] = ("stock UE lighting (sun + atmosphere + real-time sky light, engine default exposure); build "
+                   "dropped the captured sky mesh (report.sky_skipped) and no captured cube map is wired into the "
+                   "sky light, so the sky colour is the atmosphere's, not the game's")
+    json.dump(rig, open(os.path.join(sdir, "ue_lighting.json"), "w"), indent=1)
+    log("lighting rig", json.dumps(rig))
     # camera
     cam = scene.get("camera")
     if cam:

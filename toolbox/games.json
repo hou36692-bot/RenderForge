@@ -1,5 +1,5 @@
 {
- "_comment": "Game profiles. A profile only selects tools and records facts/gaps for one game; it never changes other games. 'verified' lists what was actually run; 'gaps' what is known missing.",
+ "_comment": "Game profiles. A profile only selects tools and records facts/gaps for one game; it never changes other games. 'verified' lists what was actually run; 'gaps' what is known missing. 'coverage' says how far this game is supported: 'active' (worked on here, real captures/data, kept working), 'extension' (no local data; the profile + adapters exist so it can be picked up when a capture appears; nothing verified).",
  "games": {
   "wuwa": {
    "name": "Wuthering Waves",
@@ -41,7 +41,8 @@
     "instanced draws that use one section of a larger array mesh stay unmatched (whole-mesh identity only)",
     "~11k SM_ packages have no rendered LOD data in the mounted pak view and cannot be indexed",
     "key handling stays inside the user's SourceProbe"
-   ]
+   ],
+   "coverage": "active"
   },
   "zzz": {
    "name": "Zenless Zone Zero",
@@ -89,7 +90,8 @@
      0,
      1
     ]
-   ]
+   ],
+   "coverage": "active"
   },
   "genshin": {
    "name": "Genshin Impact",
@@ -110,7 +112,9 @@
    "gaps": [
     "no local install or captures: everything here is untested",
     "ingest should work if layouts match (same 3DMigoto format); unverified"
-   ]
+   ],
+   "coverage": "extension",
+   "status_note": "Postponed on purpose: the generic 3DMigoto ingest and Unity-space emitters should apply, but there is no local install or capture, so nothing here has been run. Do not present it as supported."
   },
   "hsr": {
    "name": "Honkai: Star Rail",
@@ -130,7 +134,9 @@
    "verified": [],
    "gaps": [
     "no local install or captures: untested"
-   ]
+   ],
+   "coverage": "extension",
+   "status_note": "Postponed on purpose: the generic 3DMigoto ingest and Unity-space emitters should apply, but there is no local install or capture, so nothing here has been run. Do not present it as supported."
   },
   "endfield": {
    "name": "Arknights: Endfield",
@@ -157,7 +163,9 @@
     "asset containers unreadable without game-specific decryption (no generic tool handles them)",
     "capture route untested",
     "this is the clearest example of a game that needs its own source adapter"
-   ]
+   ],
+   "coverage": "extension",
+   "status_note": "Postponed: its containers need a game-specific decryption adapter before any generic tool can read them; anti-cheat also rules out injection on this machine."
   },
   "generic-unity": {
    "name": "Unity game with standard UnityFS bundles / data files",
@@ -182,7 +190,8 @@
    ],
    "gaps": [
     "no commercial game with plain bundles was available locally"
-   ]
+   ],
+   "coverage": "extension"
   },
   "generic-unreal": {
    "name": "Unreal game with pak / IoStore",
@@ -203,7 +212,8 @@
    ],
    "gaps": [
     "each game needs EGame version, AES key and sometimes usmap"
-   ]
+   ],
+   "coverage": "extension"
   }
  }
 }

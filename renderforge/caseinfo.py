@@ -57,6 +57,14 @@ def _extract_meta(d):
             "textures": len(ex.get("textures") or {})}
 
 
+def _newest_mtime(p):
+    """Newest file under a path (a directory of screenshots counts as fresh if any image is newer)."""
+    p = Path(p)
+    if p.is_file():
+        return p.stat().st_mtime
+    return max((q.stat().st_mtime for q in p.rglob("*") if q.is_file()), default=0.0)
+
+
 def _game_from_input(inp):
     """Guess the game profile id from a capture path (profiles in toolbox/games.json carry match hints)."""
     low = (inp or "").lower()
@@ -127,6 +135,17 @@ def scan(name, case_root=None):
     unity_dir = ROOT / "unity_project" / "RenderForgeUnity" / "Assets" / "RF" / name / "Recon.unity"
     stale = [w for w in (artifact_state(name, stages, stages["emit-ue"], ue_dir=ue_dir),
                          artifact_state(name, stages, stages["emit-unity"], unity_dir=unity_dir)) if w]
+    # a rebuild rewrites build/ from scratch, which also removes the import result recorded there: downstream
+    # artifacts older than the scene they were made from no longer describe it
+    scene_p = d / "build" / "scene.json"
+    if scene_p.exists():
+        t = scene_p.stat().st_mtime
+        older = [s for s, p in (("emit-unity", d / "unity_pkg" / "unity_import_result.json"),
+                                ("shot", d / "shots"))
+                 if stages[s] and p.exists() and _newest_mtime(p) < t]
+        if older:
+            stale.append(f"{', '.join(older)} predate the current build/scene.json; re-run those steps "
+                         f"(a rebuild rewrites the scene, so anything emitted from the old one is out of date)")
 
     shots = sorted(p.name for p in (d / "shots").glob("*.png") if not p.name.startswith("compare")) if (d / "shots").exists() else []
     if not shots and (d / "unity_shot.png").exists():   # zzz-era layout
@@ -161,8 +180,13 @@ def _next_step(source, stages, game, target, stale=()):
     """The single most useful next action, as {step, cmd, why}. Never claims an optional step is required."""
     c = "{case}"
     if stale:
-        # the recorded import no longer exists in the engine: redo it before anything downstream (shot / metrics)
-        step, flag = ("emit-unity", "unity-import") if "Unity" in stale[0] else ("emit-ue", "ue-import")
+        # the recorded import no longer exists in the engine, or predates the scene: redo it before anything downstream
+        if "predate" in stale[0]:
+            first = stale[0].split(",")[0].strip()
+            step = first if first in ("emit-ue", "emit-unity", "shot") else "emit-ue"
+        else:
+            step = "emit-unity" if "Unity" in stale[0] else "emit-ue"
+        flag = {"emit-ue": "ue-import", "emit-unity": "unity-import", "shot": "shot"}[step]
         return {"step": step, "cmd": f"python -m renderforge {flag} {c}", "why": stale[0]}
     # every required stage is done: report the best optional step this case can still take, else nothing
     if stages["export"] and not stages["identify"] and source in ("rdc", "3dmigoto") and game in SOURCE_INDEX_GAMES:
@@ -242,10 +266,14 @@ def _notes(name, d, case, stages, detail, scene):
 
 
 def scan_all():
-    """Every directory under workspace/ that looks like a case (has any stage artifact or a case.json)."""
+    """Every directory under workspace/ that looks like a case (has any stage artifact or a case.json).
+
+    Names starting with `_` are RenderForge's own scratch (`_jobs`, `_logs`, `_selftest`) or an agent's probe
+    directory, never a case; listing them would make `status` and the MCP surface report work that is not a
+    reconstruction."""
     cases = []
     for p in sorted(WS.iterdir()):
-        if not p.is_dir() or p.name.startswith("."):
+        if not p.is_dir() or p.name.startswith((".", "_")):
             continue
         if not (p / "case.json").exists() and not any((p / x).exists() for x in
                                                       ("export", "build", "survey", "unity_pkg", "shots")):

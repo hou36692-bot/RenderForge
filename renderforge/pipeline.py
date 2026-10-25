@@ -159,6 +159,12 @@ def step_build(case, rt_count=None, extra_export=None, extra_pass="extra", **kw)
         extra_export = (c.get("build") or {}).get("extra_export")
     sc = build(_case_dir(case) / "export", _case_dir(case) / "build", filt,
                extra_export=extra_export, extra_pass=extra_pass)
+    ident = caseinfo._json(_case_dir(case) / "draw_identity.json")
+    if ident:
+        # a rebuild writes a fresh scene.json, so re-apply the identity this case already established; otherwise a
+        # rebuild silently un-names every mesh and drops the water/translucent kind tags that depend on it
+        from .identify import apply_draws
+        apply_draws(_case_dir(case) / "build" / "scene.json", ident)
     c = load_case(case)
     c["build"] = {"extra_export": extra_export, "extra_pass": extra_pass}
     save_case(case, c)

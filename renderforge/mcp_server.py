@@ -12,7 +12,6 @@ to work around by spawning commands.
 import json
 import sys
 import traceback
-from pathlib import Path
 
 from . import caseinfo, jobs, pipeline
 
@@ -161,12 +160,9 @@ def _call(name, args):
             kw["cmd"] = (pipeline.load_case(args["case"]).get("shot") or {}).get("console")
         return fn(args["case"], **kw)
     if name == "metrics":
-        from .metrics import compare_case
-        shot = args.get("shot") or args.get("shot_name")
-        if shot and shot.endswith(".png") and not Path(shot).exists():
-            cand = caseinfo.WS / args["case"] / "shots" / shot
-            shot = str(cand) if cand.exists() else shot
-        return compare_case(caseinfo.WS / args["case"], shot_name=shot)
+        # the same function the CLI uses: it picks the default shot (newest case shot), records `also` for the other
+        # engine, and writes the step outcome. Calling compare_case directly here made MCP and CLI disagree.
+        return pipeline.step_metrics(args["case"], shot=args.get("shot") or args.get("shot_name"))
     if name == "job_start":
         argv = _argv_for(args)
         return jobs.start(argv, name=f"{args['case']}:{args['step']}")

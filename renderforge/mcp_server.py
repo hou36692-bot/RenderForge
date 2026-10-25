@@ -70,7 +70,9 @@ TOOLS = [
             "case": {"type": "string"},
             "step": {"type": "string", "enum": ["survey", "export", "build", "build-model", "ingest-unity",
                                                 "ingest-3dmigoto", "identify", "ue-import", "unity-import", "shot",
-                                                "metrics"]},
+                                                "metrics", "shaders"]},
+            "eids": {"type": "string", "description": "shaders: comma-separated draw event ids to dump"},
+            "vs": {"type": "boolean", "description": "shaders: dump the vertex shader instead of the pixel shader"},
             "rdc": {"type": "string"}, "range": {"type": "string"}, "rt_count": {"type": "integer"},
             "extra_export": {"type": "string"}, "extra_pass": {"type": "string"},
             "bundle": {"type": "string"}, "frame_dir": {"type": "string"}, "game": {"type": "string"},
@@ -124,10 +126,10 @@ _STEPS = {
     "build-model": pipeline.step_build_model, "ingest-unity": pipeline.step_ingest_unity,
     "ingest-3dmigoto": pipeline.step_ingest_3dmigoto, "identify": pipeline.step_identify,
     "ue-import": pipeline.step_ue_import, "unity-import": pipeline.step_unity_import,
-    "shot": pipeline.step_shot, "metrics": pipeline.step_metrics,
+    "shot": pipeline.step_shot, "metrics": pipeline.step_metrics, "shaders": pipeline.step_shaders,
 }
 _STEP_KEYS = ("rdc", "range", "rt_count", "extra_export", "extra_pass", "bundle", "frame_dir", "game", "index",
-              "ids", "shot", "max_instances", "emissive", "no_instanced_index", "ticks", "cmd")
+              "ids", "shot", "max_instances", "emissive", "no_instanced_index", "ticks", "cmd", "eids", "vs")
 
 
 def _call(name, args):

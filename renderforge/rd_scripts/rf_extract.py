@@ -184,6 +184,42 @@ def main():
         log("survey done", len(rows))
         return ctrl, cap
 
+    if JOB["mode"] == "shaders":
+        # Disassembly of the unique pixel (and optionally vertex) shaders among the listed draws. Texture semantics
+        # are not in the reflection data for a stripped shipped build, so the only reliable way to tell an ORM map
+        # from a linear copy of the base colour is to read the sampling instructions and their constant-buffer
+        # offsets. Offsets are exported too: `t<N>.xy` comes from a cbuffer slot, and the slot index is what ties a
+        # map to a material parameter.
+        want_vs = bool(JOB.get("vs"))
+        only = set(JOB.get("eids") or [])
+        seen, rows = {}, []
+        for a, path in draws:
+            if only and a.eventId not in only:
+                continue
+            try:
+                ctrl.SetFrameEvent(a.eventId, True)
+                st = ctrl.GetPipelineState()
+                stage = rd.ShaderStage.Vertex if want_vs else rd.ShaderStage.Pixel
+                sid = rid(st.GetShader(stage))
+                if sid in seen:
+                    continue
+                refl = st.GetShaderReflection(stage)
+                if refl is None:
+                    continue
+                targets = ctrl.GetDisassemblyTargets(False)
+                txt = ctrl.DisassembleShader(st.GetGraphicsPipelineObject(), refl, targets[0])
+                seen[sid] = True
+                rows.append({"eid": a.eventId, "shader": sid, "stage": "vs" if want_vs else "ps",
+                             "textures": [{"slot": t.get("slot"), "res": t.get("res"), "format": t.get("format")}
+                                          for t in []],
+                             "disasm": txt})
+            except Exception:
+                log("shader dump fail", a.eventId, traceback.format_exc())
+        json.dump({"rdc": JOB["rdc"], "api": str(api), "shaders": rows},
+                  open(os.path.join(OUT, "shaders.json"), "w"), indent=1)
+        log("shaders done", len(rows))
+        return ctrl, cap
+
     if JOB["mode"] == "ids":
         # Draw identity without geometry: ordered indices per draw, the draw's position fetch, instance count.
         # Enough to hash a draw's index list for source-mesh identification without exporting vertex data.

@@ -257,6 +257,27 @@ def step_shot(case, ticks=900, cmd=None, **kw):
     return {"shot": str(dst / src.name), "console": console}
 
 
+def step_shaders(case, eids=None, vs=False, **kw):
+    """Dump the unique pixel (or vertex) shader disassembly of a case's draws.
+
+    Material semantics are not recoverable from texture statistics: a linear companion map can be an ORM
+    texture, a linear copy of the base colour, or a mask. Reading the sampling instructions is the only
+    reliable way, so this is a first-class step rather than a one-off probe (see docs/MATERIAL_SEMANTICS.md).
+    """
+    from . import rd_run
+    c = load_case(case)
+    out = _case_dir(case) / "shaders"
+    job = {"mode": "shaders", "rdc": c.get("rdc"), "out": str(out), "vs": bool(vs)}
+    if eids:
+        job["eids"] = [int(x) for x in str(eids).replace(",", " ").split()]
+    if not c.get("rdc"):
+        raise ValueError("shaders needs a RenderDoc case (case.json has no rdc)")
+    rc = rd_run.run("rf_extract.py", job)
+    sh = caseinfo._json(out / "shaders.json", {}) or {}
+    _ok(case, "shaders", rc=rc, unique=len(sh.get("shaders") or []), vs=bool(vs))
+    return {"rc": rc, "unique": len(sh.get("shaders") or []), "out": str(out)}
+
+
 def step_identify(case, index=None, ids=None, apply=True, **kw):
     from .identify import identify_draws, identify_export, apply_draws
     if not index:
@@ -382,6 +403,8 @@ def _functions(case, target=None):
     steps = _graph(source)
     if source in ("rdc", "3dmigoto"):
         steps = steps + [("identify", step_identify, ["draw_identity.json"])]
+    if source == "rdc":
+        steps = steps + [("shaders", step_shaders, ["shaders/shaders.json"])]
     out = []
     for name, fn, writes in steps + _emit_graph(target or c.get("target") or "unreal"):
         if name == "shot":
@@ -448,6 +471,9 @@ def _inputs(case, name, kw):
     if name == "identify":
         need = kw.get("index") or (c.get("identify") or {}).get("index")
         return "" if need else "--index <SourceProbe dump-index dir>"
+    if name == "shaders":
+        # optional and slow: only run it when asked, never as part of a plain `run`
+        return "" if kw.get("eids") or kw.get("vs") or kw.get("shaders") else "an explicit --eids list"
     if name == "survey":
         return "" if (kw.get("rdc") or c.get("rdc")) else "--rdc <file.rdc>"
     if name == "metrics":

@@ -23,3 +23,11 @@ unity_project/RenderForgeUnity/*.csproj
 unity_project/RenderForgeUnity/*.sln*
 unity_project/RenderForgeUnity/Assets/RF.meta
 unity_project/RenderForgeUnity/Assets/RFTest.meta
+
+# RenderForge scratch (workspace/ is ignored wholesale, but keep the intent explicit for anyone narrowing it):
+#   workspace/_logs/    runner logs, newest run per pipeline family
+#   workspace/_jobs/    background job output and exit markers
+#   workspace/_*        agent probe directories; these are experiments, not cases
+workspace/_logs/
+workspace/_jobs/
+workspace/_*/

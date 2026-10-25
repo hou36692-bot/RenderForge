@@ -87,6 +87,43 @@ def main():
             st, ct, body = get(base, f)
             check(f"ships-{f.strip('/')}", st == 200 and kind in ct and len(body) > 1000, f"{len(body)} bytes")
 
+        # 1b. the module graph is closed: every relative import in the vendored three.js files resolves to a real
+        # file served as JavaScript. A missing one is answered with a real 404 (not the HTML fallback), because the
+        # browser reports the HTML version as an opaque MIME-type error far from the cause.
+        import re
+        todo, seen, broken = ["/vendor/three/three.module.js", "/vendor/three/addons/controls/OrbitControls.js"], set(), []
+        while todo:
+            u = todo.pop()
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                st, ct, body = get(base, u)
+            except urllib.error.HTTPError as e:
+                broken.append(f"{u}:{e.code}")
+                continue
+            if "javascript" not in ct or body.lstrip()[:1] == b"<":
+                broken.append(f"{u}:not-js({ct})")
+                continue
+            text = body.decode("utf-8", "replace")
+            for m in re.finditer(r"from\s+['\"](\.{1,2}/[^'\"]+)['\"]", text):
+                ref = m.group(1)
+                base_dir = u.rsplit("/", 1)[0]
+                parts = (base_dir + "/" + ref).split("/")
+                out = []
+                for part in parts:
+                    if part == "..":
+                        out.pop()
+                    elif part and part != ".":
+                        out.append(part)
+                todo.append("/" + "/".join(out))
+        check("vendored-module-graph-closed", not broken, ", ".join(broken) or f"{len(seen)} modules")
+        try:
+            get(base, "/vendor/three/does-not-exist.js")
+            check("missing-static-file-is-404", False, "served something")
+        except urllib.error.HTTPError as e:
+            check("missing-static-file-is-404", e.code == 404, f"HTTP {e.code}")
+
         # 2. case list equals the CLI's
         cases = get_json(base, "/api/cases")["cases"]
         rc, out = cli("status", "--json")
@@ -189,6 +226,30 @@ def main():
             check("job-finishes", st.get("state") == "done", f"state={st.get('state')} rc={st.get('rc')}")
             log = get_json(base, f"/api/jobs/{jid}/log?tail=5").get("log", "")
             check("job-log-available", "rf-job" in log or "metrics" in log, f"{len(log)} chars")
+
+        # 10a. the 3D viewer's data endpoint: raw geometry, correctly framed and 4-byte aligned
+        import struct
+        st, ct, raw = get(base, f"/api/meshbin?case={name}&mesh={mesh}")
+        hlen = struct.unpack("<I", raw[:4])[0]
+        hdr = json.loads(raw[4:4 + hlen])
+        expect = hdr["verts"] * 12 + hdr["indices"] * 4
+        check("meshbin-framing", st == 200 and ct == "application/octet-stream"
+              and len(raw) - 4 - hlen == expect and hlen % 4 == 0,
+              f"{hdr['verts']}v {hdr['indices']}i, payload {len(raw) - 4 - hlen}/{expect}, hlen%4={hlen % 4}")
+
+        # 10b. the page data must not contain values the UI would print as "null"/"undefined" into visible text.
+        # A JS-side null slipping past a guard is invisible to an HTTP check but obvious to a reader, so check the
+        # serialised payload for the shapes that cause it: a bare null where an object is expected.
+        bad = []
+        for c in cases:
+            n = c["case"]
+            det = get_json(base, f"/api/case/{n}")
+            for key in ("reference", "shots", "metrics"):
+                if key not in det:
+                    bad.append(f"{n}: missing {key}")
+            if det.get("reference") is not None and not str(det["reference"]).startswith("/img"):
+                bad.append(f"{n}: reference is not an /img url")
+        check("case-payload-shape", not bad, ", ".join(bad) or f"{len(cases)} cases")
 
         # 11. every case renders its own pages without a 500
         broken = []

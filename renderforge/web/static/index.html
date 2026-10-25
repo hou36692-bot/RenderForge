@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>RenderForge 工作台</title>
 <link rel="stylesheet" href="/app.css">
+<!-- three.js is vendored under static/vendor/ (MIT) so the workbench works offline; the map is what lets its
+     addons (OrbitControls) resolve "three". -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/three.module.js",
+    "three/addons/": "/vendor/three/addons/"
+  }
+}
+</script>
 </head>
 <body>
 <header class="topbar">
@@ -92,8 +102,24 @@
   </section>
 </main>
 
+<dialog id="viewer" class="viewer">
+  <div class="viewer-head">
+    <div>
+      <div class="viewer-title"></div>
+      <div class="viewer-sub"></div>
+    </div>
+    <div class="viewer-meta">
+      <span class="viewer-info"></span>
+      <button class="viewer-close ghost" title="关闭（Esc）">关闭</button>
+    </div>
+  </div>
+  <div class="viewer-stage"></div>
+  <div class="viewer-hint">拖动旋转 · 滚轮缩放 · 右键平移</div>
+</dialog>
+
 <div id="toast" class="toast"></div>
 
+<script src="/viewer.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

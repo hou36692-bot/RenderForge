@@ -9,4 +9,4 @@ dependencies = ["numpy", "pillow"]
 packages = ["renderforge", "renderforge.web", "renderforge.adapters"]
 
 [tool.setuptools.package-data]
-"renderforge.web" = ["static/*"]
+"renderforge.web" = ["static/*", "static/*/*", "static/*/*/*", "static/*/*/*/*"]

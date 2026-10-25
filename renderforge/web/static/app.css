@@ -89,6 +89,23 @@ main { flex: 1; min-height: 0; }
 .pane { flex: 1; overflow-y: auto; padding: 18px 22px; min-width: 0; }
 .placeholder { color: var(--dim); display: grid; place-items: center; height: 100%; }
 
+/* case header: title + stage badges on the left, the capture's own frame on the right */
+.case-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+.case-head-main { min-width: 0; flex: 1; }
+.case-preview {
+  flex: 0 0 auto; width: 420px; max-width: 42%;
+  display: block; border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; background: #101216; text-decoration: none;
+}
+.case-preview:hover { border-color: #4a5361; }
+.case-preview img { display: block; width: 100%; height: auto; }
+.case-preview.empty {
+  height: 118px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 4px; color: var(--dim);
+}
+.case-preview.empty .t { font-size: 12px; }
+.case-preview.empty .s { font-size: 11px; }
+
 .badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
 .badge {
   font-size: 11px; padding: 2px 8px; border-radius: 20px;
@@ -184,3 +201,36 @@ main { flex: 1; min-height: 0; }
 }
 .toast.show { opacity: 1; transform: translateY(0); }
 .toast.err { background: #8c3b3b; }
+
+/* ---- 3D viewer ---- */
+.card .thumb { position: relative; }
+.card .thumb.viewing img { opacity: 0; }
+.card .thumb .viewer-canvas { position: absolute; inset: 0; display: block; }
+.card .thumb::after {
+  content: "3D"; position: absolute; right: 6px; bottom: 5px; font-size: 9px; letter-spacing: .5px;
+  color: var(--muted); background: rgba(20,22,26,.72); border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 4px; opacity: 0; transition: opacity .12s; pointer-events: none;
+}
+.card:hover .thumb::after { opacity: 1; }
+.card .thumb.viewing::after { opacity: 0; }
+.card { cursor: zoom-in; }
+
+dialog.viewer {
+  width: min(1100px, 92vw); height: min(760px, 88vh); padding: 0;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden;
+  /* a dialog's default centring relies on margin:auto; the flex layout below must not replace it */
+  margin: auto;
+}
+dialog.viewer[open] { display: flex; flex-direction: column; }
+dialog.viewer::backdrop { background: rgba(8, 9, 11, .72); }
+.viewer-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+.viewer-title { font-weight: 600; }
+.viewer-sub { font-size: 11px; color: var(--dim); font-family: ui-monospace, Consolas, monospace; }
+.viewer-meta { display: flex; align-items: center; gap: 14px; font-size: 11px; color: var(--muted); }
+.viewer-stage { flex: 1; min-height: 0; position: relative; background: #23272f; }
+.viewer-stage .viewer-canvas { display: block; width: 100%; height: 100%; }
+.viewer-hint { padding: 6px 14px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }

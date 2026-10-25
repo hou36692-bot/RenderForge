@@ -154,13 +154,27 @@ function renderCaseMain() {
       h("tr", {}, h("td", { text: k }), h("td", { text: fmt(v) })))),
   ) : null;
 
-  pane.append(
-    h("h2", { text: d.case }),
-    h("div", { class: "badges" }, badges),
+  // The reference frame is what makes a case recognisable at a glance: "which capture is this?" is the first
+  // question anyone asks of a list of frame numbers. A case with no capture (a source-package case) has nothing
+  // to show, so the slot explains that instead of leaving a hole.
+  const preview = d.reference
+    ? h("a", { class: "case-preview", href: d.reference, target: "_blank", title: "点击查看完整参考帧" },
+        h("img", { src: d.reference, alt: `${d.case} 参考帧` }))
+    : h("div", { class: "case-preview empty" },
+        h("div", { class: "t", text: d.source === "unity-bundle" ? "无截帧（Unity 资源包来源）" : "无参考帧" }),
+        h("div", { class: "s", text: d.source === "unity-bundle" ? "该案例由资源包直接构建" : "尚未导出参考帧" }));
+
+  const parts = [
+    h("div", { class: "case-head" },
+      h("div", { class: "case-head-main" },
+        h("h2", { text: d.case }),
+        h("div", { class: "badges" }, badges)),
+      preview),
     kv,
-    notes,
-    report,
-  );
+  ];
+  if (notes) parts.push(notes);
+  if (report) parts.push(report);
+  pane.append(...parts);
 }
 
 /* ---------- flow ---------- */
@@ -318,10 +332,18 @@ function renderAssets() {
       title = r.id;
       sub = [r.water && "水", r.translucent && "半透明", r.masked && "遮罩", r.normal && "法线"].filter(Boolean).join(" · ") || "普通";
     }
-    grid.append(h("div", { class: "card" },
+    const card = h("div", { class: "card" },
       h("div", { class: "thumb" }, thumb),
       h("div", { class: "cap" }, h("div", { class: "t", text: title, title }), h("div", { class: "s", text: sub })),
-    ));
+    );
+    if (state.assetKind === "meshes") {
+      // Hovering swaps the static thumbnail for the shared WebGL canvas (one context for the whole page); clicking
+      // opens the full viewer. Both are optional: if the viewer cannot load, the card keeps its thumbnail.
+      card.addEventListener("mouseenter", () => MeshViewer.hover(state.case, r.id, card));
+      card.addEventListener("mouseleave", () => MeshViewer.unhover(card));
+      card.addEventListener("click", () => MeshViewer.open(state.case, r.id, title));
+    }
+    grid.append(card);
   }
   observeLazy(grid);
 }
@@ -440,6 +462,7 @@ function setView(v) {
 }
 
 function boot() {
+  MeshViewer.wireDialog();
   $$("#tabs button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   $("#refresh").addEventListener("click", async () => {
     await loadCases();

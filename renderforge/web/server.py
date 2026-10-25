@@ -386,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(q)
             if path == "/img":
                 return self._img(q)
+            if path == "/api/meshbin":
+                return self._meshbin(q)
             return self._static(path)
         except KeyError as e:
             return self._err(404, str(e).strip("'"))
@@ -427,6 +429,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, case_summary())
         if path == "/api/thumb/mesh":
             return self._thumb(q)
+        if path == "/api/meshbin":
+            return self._meshbin(q)
         if path == "/api/jobs":
             return self._send(200, {"jobs": jobs.list_jobs(int(q.get("limit", ["20"])[0]))})
         m = re.match(r"^/api/jobs/([^/]+)(/log)?$", path)
@@ -462,6 +466,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(400, "thumb needs case and mesh")
         png = mesh_thumbnail(case, mesh)
         return self._send(200, png, "image/png")
+
+    def _meshbin(self, q):
+        """Raw geometry for the in-browser 3D viewer: positions then indices, little-endian, no conversion.
+
+        The scene package already stores exactly what a GPU wants (Nx3 float32 + uint32 triangles), so the viewer
+        gets those bytes and nothing else. Serving them avoids a GLB/glTF conversion step that would only re-encode
+        the same arrays, and keeps the browser's copy identical to what the UE/Unity emitters read.
+        """
+        case = (q.get("case") or [""])[0]
+        mesh = (q.get("mesh") or [""])[0]
+        if not case or not mesh:
+            return self._err(400, "meshbin needs case and mesh")
+        sc = _json(WS / case / "build" / "scene.json") or {}
+        info = (sc.get("meshes") or {}).get(mesh)
+        if not info:
+            raise KeyError(f"no mesh {mesh} in {case}")
+        d = WS / case / "build" / info["dir"]
+        pos_p, idx_p = d / "pos.f32", d / "idx.u32"
+        if not pos_p.is_file() or not idx_p.is_file():
+            raise KeyError(f"mesh {mesh} has no geometry files")
+        pos, idx = pos_p.read_bytes(), idx_p.read_bytes()
+        nv, ni = len(pos) // 12, len(idx) // 4
+        header = {"case": case, "mesh": mesh, "verts": nv, "indices": ni,
+                  "has_uv": (d / "uv.f32").is_file(), "has_nrm": (d / "nrm.f32").is_file()}
+        # [uint32 header length][JSON header][pos bytes][idx bytes]
+        hb = json.dumps(header).encode("utf-8")
+        pad = (-len(hb)) % 4                      # keep the float32/uint32 payloads 4-byte aligned
+        hb += b" " * pad
+        body = len(hb).to_bytes(4, "little") + hb + pos + idx
+        self._send(200, body, "application/octet-stream")
 
     def _img(self, q):
         """A display-sized PNG (longest side <= `w`, default 1600) for a workspace image.
@@ -514,7 +548,8 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
         if ctype not in ("image/png", "image/jpeg", "image/webp"):
             return self._err(403, f"only images are served, not {ctype}")
-        self._send(200, p.read_bytes(), ctype)
+        self._send(200, p.read_bytes(), ctype,
+                   extra={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"})
 
     def _static(self, path):
         if path in ("/", ""):
@@ -524,14 +559,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(400, "bad path")
         p = STATIC / rel
         if not p.is_file():
-            # single-page app: unknown paths fall back to index.html
+            # Single-page app: a bare route (no file extension) falls back to index.html. A path that names a file
+            # (.js/.css/.png...) and is missing must be a real 404: answering it with HTML is what made a missing
+            # vendored module surface as a baffling "MIME type text/html" error in the browser instead of "not found".
+            if Path(rel).suffix:
+                return self._err(404, f"no such static file: {rel}")
             p = STATIC / "index.html"
             if not p.is_file():
                 return self._err(404, "no static files installed")
         ctype = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
-                 ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml",
+                 ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+                 ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml",
                  ".png": "image/png", ".ico": "image/x-icon"}.get(p.suffix, "application/octet-stream")
-        self._send(200, p.read_bytes(), ctype)
+        self._send(200, p.read_bytes(), ctype,
+                   extra={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"})
 
 
 def serve(host="127.0.0.1", port=8770):

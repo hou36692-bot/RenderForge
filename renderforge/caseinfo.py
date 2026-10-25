@@ -182,7 +182,8 @@ def _next_step(source, stages, game, target, stale=()):
     if stale:
         # the recorded import no longer exists in the engine, or predates the scene: redo it before anything downstream
         if "predate" in stale[0]:
-            first = stale[0].split(",")[0].strip()
+            # the message names the stale steps; act on the first one that is actually stale, not on a guess
+            first = stale[0].split(" predate")[0].split(",")[0].strip()
             step = first if first in ("emit-ue", "emit-unity", "shot") else "emit-ue"
         else:
             step = "emit-unity" if "Unity" in stale[0] else "emit-ue"

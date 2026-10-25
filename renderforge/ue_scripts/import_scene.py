@@ -124,47 +124,107 @@ def make_master(name, with_base, with_normal, masked=False):
     return mat
 
 
-def make_translucent_master(name, opaque=False, alpha=True):
-    """Translucent master. `alpha` uses texture alpha as coverage; without it masks on luminance (BC1 particle
-    sheets have no alpha channel) so a soft dust card does not turn into an opaque disk."""
+def make_translucent_master(name, mode):
+    """Translucent master for one coverage source.
+
+    The capture's translucent batch is not one blend mode, so there is not one master. Reading the D3D11 blend state
+    and the pixel shaders of those draws gives four shapes, and `mode` picks the graph:
+
+      alpha      opacity = texture alpha                  (game: SrcAlpha/InvSrcAlpha, shader uses .a)
+      red        opacity = texture red channel            (game: SrcAlpha/InvSrcAlpha, sample dotted with (1,0,0,0))
+      luminance  opacity = mean(RGB) of the sheet         (game: SrcAlpha/InvSrcAlpha, opacity from a depth fade
+                                                           only -- no texture mask, so the sheet's own brightness
+                                                           is the best available coverage)
+      additive   unlit sheet added to the frame           (game: One/One, shader writes opacity 0)
+
+    The old single master used texture alpha for everything, which turned the black-with-white-sparkles sheets into
+    solid black cards, and used BLEND_MASKED + a x2 threshold for the BC1 ones, which clipped most soft sheets to
+    opaque. Thresholds are material parameters so a shot can be tuned without editing this file.
+    """
     path = f"{ROOT}/Materials/{name}"
+    # the graph is part of the material definition, not of the instance: an asset left over from an earlier import
+    # would keep the old blend mode. Instances are recreated below anyway, so rebuild (same as make_water_master).
     if eal.does_asset_exist(path):
-        return eal.load_asset(path)  # masters keep their definition across runs; new ones get new names
+        eal.delete_asset(path)
     mat = tools.create_asset(name, f"{ROOT}/Materials", unreal.Material, unreal.MaterialFactoryNew())
     mel = unreal.MaterialEditingLibrary
     mat.set_editor_property("two_sided", True)
-    if alpha:
-        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+    if mode == "additive":
+        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_ADDITIVE)
+        # an additive sheet is emitted light, not a lit surface; unlit stops the sun/sky from shading it
+        mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     else:
-        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
-    if opaque:
-        mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_DEFAULT_LIT)
-    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 0)
+        mat.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+        if mode == "red":
+            # In 107901 the texture sample is dotted only with (1,0,0,0) to form opacity; its RGB never reaches the
+            # output -- the colour is a particle constant this importer does not have. Using the sheet's RGB (mostly
+            # black) as base colour painted a dark veil over everything the 50 haze quads cover, so the colour is a
+            # Tint parameter and the material is unlit, matching dust/embers that emit rather than reflect.
+            mat.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
+
+    tb = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -700, 0)
     tb.set_editor_property("parameter_name", "BaseColor")
     tb.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineResources/WhiteSquareTexture.WhiteSquareTexture"))
-    mel.connect_material_property(tb, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
-    if alpha:
-        # particle / water-line textures carry coverage in alpha; without it the quads render as solid rectangles
-        mel.connect_material_property(tb, "A", unreal.MaterialProperty.MP_OPACITY)
+
+    if mode == "additive":
+        boost = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -700, 200)
+        boost.set_editor_property("parameter_name", "AdditiveBoost")
+        boost.set_editor_property("default_value", 1.0)
+        mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -400, 100)
+        mel.connect_material_expressions(tb, "RGB", mul, "A")
+        mel.connect_material_expressions(boost, "", mul, "B")
+        # unlit reads emissive only; the sheet's black background adds nothing under One/One
+        mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
     else:
-        # mean(RGB): the sheet is white-on-black, so luminance is the coverage mask
-        lum = mel.create_material_expression(mat, unreal.MaterialExpressionDotProduct, -300, 200)
-        mel.connect_material_expressions(tb, "RGB", lum, "A")
-        third = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -500, 200)
-        third.set_editor_property("constant", unreal.LinearColor(0.3333, 0.3333, 0.3333, 1.0))
-        mel.connect_material_expressions(third, "", lum, "B")
-        # soft sheets are shown as a mask at a low threshold, not as opaque cards
-        boost = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -150, 200)
-        mel.connect_material_expressions(lum, "", boost, "A")
-        k = mel.create_material_expression(mat, unreal.MaterialExpressionConstant, -300, 300)
-        k.set_editor_property("r", 2.0)
-        mel.connect_material_expressions(k, "", boost, "B")
-        mel.connect_material_property(boost, "", unreal.MaterialProperty.MP_OPACITY_MASK)
-    tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 300)
-    tn.set_editor_property("parameter_name", "Normal")
-    tn.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"))
-    tn.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
-    mel.connect_material_property(tn, "RGB", unreal.MaterialProperty.MP_NORMAL)
+        if mode == "red":
+            tint = mel.create_material_expression(mat, unreal.MaterialExpressionVectorParameter, -450, -150)
+            tint.set_editor_property("parameter_name", "Tint")
+            tint.set_editor_property("default_value", unreal.LinearColor(0.85, 0.88, 0.92, 1.0))
+            mel.connect_material_property(tint, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
+        else:
+            mel.connect_material_property(tb, "RGB", unreal.MaterialProperty.MP_BASE_COLOR)
+        if mode == "alpha":
+            mask_out, mask_pin = tb, "A"
+        elif mode == "red":
+            # the game shader takes coverage from the red channel of the sheet, not from its (constant) alpha
+            cm = mel.create_material_expression(mat, unreal.MaterialExpressionComponentMask, -450, 250)
+            cm.set_editor_property("r", True)
+            cm.set_editor_property("g", False)
+            cm.set_editor_property("b", False)
+            cm.set_editor_property("a", False)
+            mel.connect_material_expressions(tb, "RGB", cm, "")
+            mask_out, mask_pin = cm, ""
+        else:
+            # mean(RGB): a white-on-black sheet carries its coverage in brightness
+            lum = mel.create_material_expression(mat, unreal.MaterialExpressionDotProduct, -450, 250)
+            mel.connect_material_expressions(tb, "RGB", lum, "A")
+            third = mel.create_material_expression(mat, unreal.MaterialExpressionConstant3Vector, -700, 350)
+            third.set_editor_property("constant", unreal.LinearColor(0.3333, 0.3333, 0.3333, 1.0))
+            mel.connect_material_expressions(third, "", lum, "B")
+            mask_out, mask_pin = lum, ""
+        op = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -450, 450)
+        op.set_editor_property("parameter_name", "Opacity")
+        op.set_editor_property("default_value", 1.0)
+        mul = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, -200, 300)
+        mel.connect_material_expressions(mask_out, mask_pin, mul, "A")
+        mel.connect_material_expressions(op, "", mul, "B")
+        if mode == "alpha":
+            mel.connect_material_property(mul, "", unreal.MaterialProperty.MP_OPACITY)
+        else:
+            # MaskBoost lets a sheet be pushed brighter/dimmer without re-importing; 1.0 keeps the sheet's own values
+            boost = mel.create_material_expression(mat, unreal.MaterialExpressionScalarParameter, -450, 600)
+            boost.set_editor_property("parameter_name", "MaskBoost")
+            boost.set_editor_property("default_value", 1.0)
+            mul2 = mel.create_material_expression(mat, unreal.MaterialExpressionMultiply, 0, 300)
+            mel.connect_material_expressions(mul, "", mul2, "A")
+            mel.connect_material_expressions(boost, "", mul2, "B")
+            mel.connect_material_property(mul2, "", unreal.MaterialProperty.MP_OPACITY)
+    if mode != "additive":  # unlit: the normal input would be ignored, so do not add a node that does nothing
+        tn = mel.create_material_expression(mat, unreal.MaterialExpressionTextureSampleParameter2D, -500, 750)
+        tn.set_editor_property("parameter_name", "Normal")
+        tn.set_editor_property("texture", unreal.load_object(None, "/Engine/EngineMaterials/DefaultNormal.DefaultNormal"))
+        tn.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+        mel.connect_material_property(tn, "RGB", unreal.MaterialProperty.MP_NORMAL)
     mel.recompile_material(mat)
     eal.save_loaded_asset(mat)
     return mat
@@ -261,9 +321,42 @@ def make_materials(tex_paths):
         ("m", True): make_master("M_RF_TexNM", True, True, True),
     }
     mel = unreal.MaterialEditingLibrary
-    trans_master = make_translucent_master("M_RF_Translucent")
-    trans_master_lum = make_translucent_master("M_RF_TranslucentLum", alpha=False)
+    trans_masters = {}
     water_masters = {}
+
+    def translucent_mode(key, m, tex_rec):
+        """Blend/coverage mode for one translucent material.
+
+        Proven from the capture (blend state per draw + PS disassembly, see the notes in make_translucent_master):
+        the 112882/127115/6213 draws are One/One with `mov o0.w, 0`, so they are additive; 83092 takes its alpha
+        from texture .a (sample dotted with (0,0,0,1)); 115765 takes it from .r (dotted with (1,0,0,0)); the rest
+        are SrcAlpha/InvSrcAlpha whose shader derives opacity from a soft depth fade with no texture mask, so the
+        sheet's luminance is used instead.
+
+        Two of the calls are judgements, not proof, and are flagged as such in the log: 44813 (45386) and 64024/
+        103749 (102903, 136020) all compute a view/depth term in the shader that this importer does not reconstruct,
+        so for them "luminance" means "the sheet's brightness, which is what the eye sees in the reference".
+        """
+        fmt = (tex_rec or {}).get("format", "")
+        base = m.get("base")
+        if key in ("mat_112882_112873", "mat_112882_115840"):
+            return "additive", "proven: One/One blend, shader writes opacity 0"
+        if key in ("mat_127115_none", "mat_6213_none"):
+            return "additive", "proven: One/One blend, shader writes opacity 0"
+        if key == "mat_none_none":
+            # no base texture at all: the PS (108513) samples only a depth-buffer texture and multiplies a vertex
+            # colour; adding a white untextured card would wash the frame out, so skip it and say so
+            return None, "skipped: no base texture and the shader only reads the depth buffer"
+        if base and "83092" in base:
+            return "alpha", "proven: opacity = dot(sample(t3), (0,0,0,1))"
+        if base and "115765" in base:
+            return "red", "proven: opacity = dot(sample(t1), (1,0,0,0)) x vertex colour"
+        return "luminance", "judgement: game masks on a depth fade; sheet brightness used as coverage"
+
+    def translucent_master(mode):
+        if mode not in trans_masters:
+            trans_masters[mode] = make_translucent_master(f"M_RF_Translucent_{mode}", mode)
+        return trans_masters[mode]
 
     def water_master(with_base, with_normal):
         """Single-layer water preview: translucent teal base multiplied by the water texture, animated normals.
@@ -281,19 +374,32 @@ def make_materials(tex_paths):
             log("water material", key, m.get("base"), has_b, m.get("normal"), m.get("normal") in tex_paths)
         has_n = bool(m["normal"]) and m["normal"] in tex_paths and eal.does_asset_exist(tex_paths[m["normal"]])
         water = bool(m.get("water"))
+        tex_rec = (scene["textures"].get(m["base"]) or {}) if m["base"] else {}
+        mode = reason = None
+        if m.get("translucent") and not water:
+            mode, reason = translucent_mode(key, m, tex_rec)
         # Particle additive/soft particles often bind only an effect texture: without a base colour we cannot
         # reproduce them from a plain mask, and a flat translucent card would cover the scene. Leave those out
         # rather than fake them; they are reported in the import result.
         translucent = bool(m.get("translucent")) and has_b
         if m.get("translucent") and not has_b:
             res["translucent_skipped"] = res.get("translucent_skipped", 0) + 1
+            if reason:
+                n = sum(1 for i in scene["instances"] if i["material"] == key and i["kind"] == "translucent")
+                res.setdefault("translucent_modes", {})[key] = {
+                    "mode": "skipped", "why": reason, "instances": n,
+                    "base": m["base"], "format": tex_rec.get("format")}
+                log("translucent mode", key, "skipped", n, "instances --", reason)
             continue
         if water:
             parent = water_master(has_b, has_n)
         elif translucent:
-            # BC1/BC7 sheets without an alpha channel: mask on luminance instead of drawing a solid card
-            tex_rec = scene["textures"].get(m["base"]) or {}
-            parent = trans_master_lum if tex_rec.get("format", "").startswith("BC1") else trans_master
+            parent = translucent_master(mode)
+            n = sum(1 for i in scene["instances"] if i["material"] == key and i["kind"] == "translucent")
+            res.setdefault("translucent_modes", {})[key] = {
+                "mode": mode, "why": reason, "instances": n,
+                "base": m["base"], "format": tex_rec.get("format")}
+            log("translucent mode", key, mode, n, "instances --", reason)
         else:
             parent = masters[("m", has_n)] if (m.get("masked") and has_b) else masters[(has_b, has_n)]
         mi_path = f"{ROOT}/Materials/MI_{key}"

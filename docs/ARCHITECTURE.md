@@ -23,7 +23,7 @@ Agent 先看 `doctor`（本机有什么）和 `plan`（这个游戏 + 这种输�
         │ UE 5.8 (headless python)         │   │ UE 官方 MCP / Unity CLI-MCP  │   │ 离屏截图  │
         │ Unity 6 (batchmode C#)           │   │ 对话式改场景                  │   │ 并排对比  │
         └──────────────────────────────────┘   └──────────────────────────────┘   └───────────┘
-        L8 编排：toolbox/registry.json · games.json · recipes.json · CLI(doctor/plan/docs) · CLAUDE.md · 用户已有 skills
+        L8 编排：toolbox/registry.json · games.json · recipes.json · CLI(doctor/plan/docs) · MCP · agent skills
            工作台：caseinfo(status) → pipeline(run) → metrics/selftest → mcp_server/jobs
 ```
 

@@ -4,7 +4,8 @@ A 3DMigoto Frame Analysis dump has no post-vertex-shader positions, so `ingest_3
 meshes in their own model space. Recovering where those meshes actually sit in the world is game
 specific: it depends on which cbuffer slot holds the per-object matrix, which holds the view, and which
 projection variant the pass used. That knowledge lives here, one module per game, rather than in the
-shared pipeline (see the isolation rule in CLAUDE.md).
+shared pipeline: an adapter must never be imported by another game's adapter, so one game's quirks cannot
+leak into the generic path.
 
 Every adapter exposes the same shape so `pipeline` can call it without knowing the game:
 

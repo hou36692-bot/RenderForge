@@ -483,7 +483,7 @@
    "evidence": [
     "renderforge/ue_scripts/import_scene.py: 523 meshes / 19k instances / 197 materials in ~45 s headless"
    ],
-   "notes": "See CLAUDE.md for the verified pitfalls (StaticMesh creation, ISM via Blueprint, no normal setter, game-mode screenshots)."
+   "notes": "Verified pitfalls: StaticMeshDescription cannot set normals (rely on the LOD build settings recompute_normals/tangents); create a StaticMesh by duplicating /Engine/BasicShapes/Cube then build_from_static_mesh_descriptions; ISM needs a Blueprint with an ISM component; screenshots must use game mode (-game -RenderOffScreen), not SceneCapture in the editor."
   },
   {
    "id": "ue-interchange",

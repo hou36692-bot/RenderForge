@@ -5,6 +5,25 @@ workspace/
 __pycache__/
 *.pyc
 *.rdc
+
+# Machine-local configuration. `.mcp.example.json` is the template that IS published.
+.mcp.json
+.claude/launch.json
+.claude/settings.local.json
+
+# Working notes kept on the author's machine: an agent brief and a hand-off log. The public project
+# documents the same facts in README.md, ROADMAP.md and docs/ARCHITECTURE.md.
+CLAUDE.md
+HANDOFF.md
+# one-off debugging scripts from individual investigation sessions (paths, ad-hoc probes)
+scripts/dev/dbg*.py
+scripts/dev/check_*.py
+scripts/dev/analyze_fit.py
+scripts/dev/find_vp*.py
+scripts/dev/peek.py
+scripts/dev/try_solve*.py
+scripts/dev/why_*.py
+
 # UE project: keep only the project file and config; generated content is rebuilt by the importer
 ue_project/RenderForgeUE/Content/
 ue_project/RenderForgeUE/Intermediate/

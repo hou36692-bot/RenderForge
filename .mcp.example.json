@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "renderforge": {
+      "command": "/absolute/path/to/RenderForge/.venv/bin/python",
+      "args": ["-m", "renderforge.mcp_server"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/RenderForge",
+        "PYTHONIOENCODING": "utf-8"
+      }
+    }
+  }
+}

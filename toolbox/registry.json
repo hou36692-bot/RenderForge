@@ -102,7 +102,8 @@
    ],
    "status": "reference",
    "integration": "reference-only",
-   "notes": "Community UI extensions; useful as examples of the extension API. Not needed for headless extraction."
+   "notes": "Community UI extensions; useful as examples of the extension API. Not needed for headless extraction.",
+   "evidence": []
   },
   {
    "id": "nsight-graphics",
@@ -129,7 +130,8 @@
    "local": {
     "detect": "C:\\Program Files\\NVIDIA Corporation\\Nsight Graphics*"
    },
-   "notes": "Fallback when RenderDoc cannot capture (e.g. DX12 + ray tracing). No known scripted resource export comparable to RenderDoc's Python API, so treat as visual/shader debugging, not as an extraction source."
+   "notes": "Fallback when RenderDoc cannot capture (e.g. DX12 + ray tracing). No known scripted resource export comparable to RenderDoc's Python API, so treat as visual/shader debugging, not as an extraction source.",
+   "evidence": []
   },
   {
    "id": "pix",
@@ -153,7 +155,8 @@
    "local": {
     "detect": "C:\\Program Files\\Microsoft PIX"
    },
-   "notes": "D3D12-only fallback for titles RenderDoc mishandles. Same caveat as Nsight: export automation unverified."
+   "notes": "D3D12-only fallback for titles RenderDoc mishandles. Same caveat as Nsight: export automation unverified.",
+   "evidence": []
   },
   {
    "id": "3dmigoto",
@@ -175,7 +178,7 @@
    "status": "verified-prior",
    "integration": "adapter",
    "evidence": [
-    "D:\\HOU\\zzz_reverse\\evidence\\zzmi\\Frame01 (1.9GB dump)",
+    "a local 3DMigoto FrameAnalysis dump (1.9 GB)",
     "workspace/zzz_frame01 (ingested here)"
    ],
    "notes": "Capture mechanism behind GIMI/SRMI/ZZMI/WWMI. A Frame Analysis dump contains PRE-vertex-shader buffers (no post-VS clip positions) so the generic transform solver does not apply; ingest emits model-space meshes and needs a per-game placement hook.",
@@ -201,11 +204,12 @@
    "status": "verified-prior",
    "integration": "manual-gui",
    "evidence": [
-    "D:\\HOU\\zzz_reverse\\tools\\xxmi (XXMI 2.2.1 + ZZMI 1.5.0 used for the 3 ZZZ frames)",
-    "D:\\HOU\\zzz_reverse\\derived\\zzz-capture-unpack-toolkit"
+    "%RF_TOOLS%\\xxmi (XXMI 2.2.1 + ZZMI 1.5.0 used for the 3 ZZZ frames)",
+    "%RF_TOOLS%\\zzz-capture-unpack-toolkit"
    ],
    "local": {
-    "detect": "D:\\HOU\\zzz_reverse\\tools\\xxmi"
+    "detect": "%RF_TOOLS%\\xxmi\\XXMI Launcher.exe",
+    "note": "RF_TOOLS points at a local tool directory; set it before running doctor."
    },
    "notes": "Per-game 3DMigoto packages + injection management. Upstream is far ahead (2.4.9). Capture procedure (Hunting, F8 per frame) is written in the user's toolkit README. Capture tool, not an extractor and not a mod tool by itself."
   },
@@ -224,7 +228,8 @@
    ],
    "status": "candidate",
    "integration": "adapter",
-   "notes": "Game-specific: reads WuWa frame dumps into Blender with Kuro's buffer layouts (also does mod export). Use its layout knowledge/ output as an alternative WuWa ingest; do NOT treat as generic. Blender is installed locally (D:\\Blender) but this add-on was not run."
+   "notes": "Game-specific: reads WuWa frame dumps into Blender with Kuro's buffer layouts (also does mod export). Use its layout knowledge/ output as an alternative WuWa ingest; do NOT treat as generic. Blender is installed locally (D:\\Blender) but this add-on was not run.",
+   "evidence": []
   },
   {
    "id": "gi-model-importer",
@@ -241,7 +246,8 @@
    ],
    "status": "reference",
    "integration": "reference-only",
-   "notes": "MOD tools: they replace assets at runtime. Not an extraction pipeline. Value for us: documented per-game buffer/shader conventions and 3DMigoto config. SR-Model-Importer is stale (2023) and superseded by XXMI's SRMI package."
+   "notes": "MOD tools: they replace assets at runtime. Not an extraction pipeline. Value for us: documented per-game buffer/shader conventions and 3DMigoto config. SR-Model-Importer is stale (2023) and superseded by XXMI's SRMI package.",
+   "evidence": []
   },
   {
    "id": "3dmigoto-guide",
@@ -251,7 +257,8 @@
    "url": "https://github.com/t1ktak/3dmigoto/blob/main/Guides/UsageInstructions.md",
    "status": "reference",
    "integration": "reference-only",
-   "notes": "Documentation for the frame-analysis workflow."
+   "notes": "Documentation for the frame-analysis workflow.",
+   "evidence": []
   },
   {
    "id": "unitypy",
@@ -328,7 +335,8 @@
    ],
    "status": "candidate",
    "integration": "wrapped",
-   "notes": "Maintained successor of Perfare/AssetStudio (archived 2022). CLI export of meshes/FBX/textures. Not run; UnityPy + AssetRipper cover the same ground for now."
+   "notes": "Maintained successor of Perfare/AssetStudio (archived 2022). CLI export of meshes/FBX/textures. Not run; UnityPy + AssetRipper cover the same ground for now.",
+   "evidence": []
   },
   {
    "id": "animestudio",
@@ -350,11 +358,12 @@
    "status": "verified-prior",
    "integration": "adapter",
    "evidence": [
-    "D:\\HOU\\zzz_reverse\\derived\\zzz-capture-unpack-toolkit\\...\\unpack\\AnimeStudio (ZZZ 3.2.0)",
-    "D:\\HOU\\zzz_reverse\\source-assets (FBX/EXR/animation exported from the installed game)"
+    "%RF_TOOLS%\\anime-studio (ZZZ 3.2.0)",
+    "%RF_TOOLS%\\zzz-source-assets (FBX/EXR/animation exported from the installed game)"
    ],
    "local": {
-    "detect": "D:\\HOU\\zzz_reverse\\tools\\zzzstudio"
+    "detect": "%RF_TOOLS%\\zzzstudio\\ZZZStudio.exe",
+    "note": "RF_TOOLS points at a local tool directory; set it before running doctor."
    },
    "notes": "NOT in the original candidate list but required: HoYo games use custom block formats that generic Unity tools cannot read. This is the model for a per-game 'source adapter'. ZZZ itself is not installed on this machine now, so it was not re-run.",
    "risks": [
@@ -377,7 +386,8 @@
    ],
    "status": "candidate",
    "integration": "manual-gui",
-   "notes": "Bundle inspection/patching GUI. Cannot be scripted; keep as the human fallback for odd bundles."
+   "notes": "Bundle inspection/patching GUI. Cannot be scripted; keep as the human fallback for odd bundles.",
+   "evidence": []
   },
   {
    "id": "il2cppdumper",
@@ -394,7 +404,8 @@
    ],
    "status": "candidate",
    "integration": "wrapped",
-   "notes": "Recovers type/field layouts from global-metadata.dat + GameAssembly.dll so MonoBehaviour data (scene settings, custom components) can be decoded. Il2CppDumper is stale (2024); LukeFZ/Il2CppInspectorRedux (AGPL-3.0, 2026) is the maintained alternative. Needed for Endfield-class games; not run."
+   "notes": "Recovers type/field layouts from global-metadata.dat + GameAssembly.dll so MonoBehaviour data (scene settings, custom components) can be decoded. Il2CppDumper is stale (2024); LukeFZ/Il2CppInspectorRedux (AGPL-3.0, 2026) is the maintained alternative. Needed for Endfield-class games; not run.",
+   "evidence": []
   },
   {
    "id": "cue4parse",
@@ -419,11 +430,12 @@
    "status": "verified-prior",
    "integration": "wrapped",
    "evidence": [
-    "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe (SourceProbe CLI on CUE4Parse 1.2.2.202609; WuWa 2.1M files indexed, meshes -> GLB, FastGeo layouts)",
+    "<local project>\\05_pipeline\\source_probe (SourceProbe CLI on CUE4Parse 1.2.2.202609; WuWa 2.1M files indexed, meshes -> GLB, FastGeo layouts)",
     "re-run here: SourceProbe selftest; dump-index of 6,009 LiNaXiTa packages -> 40,958 source sections (52 packages without render data)"
    ],
    "local": {
-    "detect": "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe\\bin\\Release\\net10.0\\SourceProbe.dll"
+    "detect": "%RF_TOOLS%\\source_probe\\SourceProbe.dll",
+    "note": "RF_TOOLS points at a local tool directory; set it before running doctor."
    },
    "notes": "The right batch tool for Unreal source assets. Needs the game's AES key (user's SourceProbe reads it from an existing local file; RenderForge never stores or prints keys) and sometimes .usmap mappings.",
    "risks": [
@@ -449,7 +461,8 @@
    "local": {
     "detect": "D:\\FModel\\FModel.exe"
    },
-   "notes": "Interactive browser/exporter built on CUE4Parse. Use to explore a game by hand and to learn paths/keys; do batch work through CUE4Parse directly. GPL-3.0 - separate process only."
+   "notes": "Interactive browser/exporter built on CUE4Parse. Use to explore a game by hand and to learn paths/keys; do batch work through CUE4Parse directly. GPL-3.0 - separate process only.",
+   "evidence": []
   },
   {
    "id": "ue-python",
@@ -529,7 +542,8 @@
    ],
    "status": "candidate",
    "integration": "direct",
-   "notes": "Alternative to the official MCP (execute_python, PIE automation). Not installed: the official server already covers editing, and headless python covers batch import. Revisit if the official toolsets lack screenshot / PIE control."
+   "notes": "Alternative to the official MCP (execute_python, PIE automation). Not installed: the official server already covers editing, and headless python covers batch import. Revisit if the official toolsets lack screenshot / PIE control.",
+   "evidence": []
   },
   {
    "id": "funplay-unity-mcp",
@@ -546,7 +560,8 @@
    ],
    "status": "candidate",
    "integration": "direct",
-   "notes": "Chat-driven Unity editing. Not installed. The user's environment already exposes a Unity CLI / MCP ('unity' server) and Unity.exe batchmode is verified here."
+   "notes": "Chat-driven Unity editing. Not installed. The user's environment already exposes a Unity CLI / MCP ('unity' server) and Unity.exe batchmode is verified here.",
+   "evidence": []
   },
   {
    "id": "unity-batchmode",
@@ -605,7 +620,8 @@
    ],
    "status": "reference",
    "integration": "reference-only",
-   "notes": "CSV mesh export -> OBJ with UE5 view-buffer reconstruction. No licence file. Our solver (fit local->clip, pick VP from cbuffers) covers the same ground generically."
+   "notes": "CSV mesh export -> OBJ with UE5 view-buffer reconstruction. No licence file. Our solver (fit local->clip, pick VP from cbuffers) covers the same ground generically.",
+   "evidence": []
   },
   {
    "id": "rf-extract",
@@ -716,7 +732,8 @@
    ],
    "status": "verified-here",
    "integration": "direct",
-   "notes": "UE: game-mode HighResShot off-screen. Unity: camera render in the import method. Comparison is side-by-side, not a pixel metric yet."
+   "notes": "UE: game-mode HighResShot off-screen. Unity: camera render in the import method. Comparison is side-by-side, not a pixel metric yet.",
+   "evidence": []
   },
   {
    "id": "user-sourceprobe",
@@ -732,9 +749,11 @@
    "status": "verified-prior",
    "integration": "adapter",
    "local": {
-    "detect": "D:\\HOU\\cuibo_reverse\\05_pipeline\\source_probe\\bin\\Release\\net10.0\\SourceProbe.dll"
+    "detect": "%RF_TOOLS%\\source_probe\\SourceProbe.dll",
+    "note": "RF_TOOLS points at a local tool directory; set it before running doctor."
    },
-   "notes": "Owned by the user's WuWa project; referenced by path, not copied. Writes only under that project's 03_source_assets / 99_scratch. RenderForge added the batch `dump-index` command (per-section hashes + per-LOD index bytes); 41,133 SM_ packages -> 157,691 sections in ~25 min."
+   "notes": "Owned by the user's WuWa project; referenced by path, not copied. Writes only under that project's 03_source_assets / 99_scratch. RenderForge added the batch `dump-index` command (per-section hashes + per-LOD index bytes); 41,133 SM_ packages -> 157,691 sections in ~25 min.",
+   "evidence": []
   },
   {
    "id": "rf-ingest-unity",

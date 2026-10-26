@@ -5,8 +5,8 @@
 ## Goal
 构建以 Claude Code 对话为入口的**多游戏、多引擎图形资源重建工具箱**（不是单一 RenderDoc→UE Demo）。范围以 Unity + Unreal 为主，UE 5.8 与 Unity 6000.0.83f1 同为已验证目标。要求：建立工具能力地图、区分通用截帧/游戏专用提取/模组工具/资源解包、复用成熟项目、游戏适配器互相隔离、区分"已验证"与"理论可行"、文档和路线图如实。用户不熟悉工程细节：自主决策，说明简洁，关键进展简短汇报，不要声称没跑过的功能完成。原始 .rdc/游戏文件只读，生成物放 `workspace/<case>/`。
 
-**本次交接的方向（用户明确要求）**：文档要与实际状态一致。上一轮已经把"工作台"（status/run/metrics/selftest/MCP）做完并验收过协议层；这一轮修了黑截图、水面、MCP/CLI 分歧、重建丢身份、status 建议错步骤，加了透明混合模式与 ZZZ 世界放置适配器，并对材质 PBR 做了一次**否定结论**的调查。
-**下一会话的主线**：把 ZZZ 适配器接进 CLI 并端到端渲染（见 Next Steps 第 1 项）。
+**本次交接的方向（用户明确要求）**：文档要与实际状态一致。本轮（2026-10-25/26）在上一轮的 CLI/工作台之上，新增了**本地可视化工作台**（本地 Web UI：任务总览 / 工作流 / 资源浏览器 / 场景结果），并按用户反馈迭代了资源预览（悬停 3D 旋转 + 内置查看器）和结果页（不再裁剪 + 点击放大）。
+**下一会话的主线**：把 ZZZ 适配器接进 CLI 并端到端渲染（见 Next Steps 第 1 项）；Web 工作台本身已可用，不进主线，只在需要时增量改。
 
 ## Current Progress（均在本机实际跑过，除非注明）
 - **黑截图已修复（已重跑验证）**：先前加的灯光 rig 是自造的 3 lux 平行光 + 手动曝光后处理体积（EV100/f-stop 关系写反了）+ movable 灯，导致**每张截图全黑（mean RGB 0,0,0）**。根因是 rig 本身而不是曝光。现在发射的关卡就是标准 UE 灯光：平行光 rotator (0,-50,30) + SkyAtmosphere + 实时捕捉 SkyLight，引擎默认曝光，**没有后处理体积**。可选覆盖仍在：`RF_SUN_INTENSITY` / `RF_SKY_INTENSITY` / `RF_FOG`。
@@ -20,7 +20,11 @@
   实测：ssim 0.3174 → **0.3394**，mae 0.3403 → **0.2997**，coverage_error 0.2415 → **0.1489**。
 - **ZZZ 世界放置适配器（未接 CLI、未端到端渲染）**：`renderforge/adapters/zzz.py`。世界矩阵 `vs-cb1[0..3]`；相机 `vs-cb0[123..126]`（camera-to-world，其第 3 行与 `vs-cb0[126]` 的 eye 字面量误差 **0.0**）；view `vs-cb0[119..122]`。213 draw 中 **72** 个刚性通过，其余是屏幕空间 UI，如实报告。draw 106 单位基投影 vs 转储剪影 **IoU 0.9783**（需 +632 px x 平移，等于 `vs-cb0[21].x == -0.44` × 1440），叠 `games.json` 的 `model_basis` 则 **0.5524**——**不能**再乘 basis。`workspace/zzz_frame01/export/extract_placed.json` 是适配器输出；出厂路径仍是 `build-model` 单位放置。
 - **材质 PBR：否定结论**（见 `docs/MATERIAL_SEMANTICS.md`，别重复调查）：线性伴随贴图不是 ORM。`o3.xyz = lerp(t2.rgb, 1.0, saturate(cb0[279].w))` 是被标量混向白的三通道色调；`o2.y` 是对 `R32_FLOAT` 遮罩采样乘 10 后取 `min`；着色器里没有 roughness/metallic；PBR 输入来自逐材质 cbuffer 标量与 3D LUT（`t5`/`t6`）；贴图槽位跨 draw 不稳定。正路是解码 `ps3` 常量块。
-- **工作台**（上一轮完成，仍在跑）：
+- **本地可视化工作台（本轮新增，已实际跑过）**：`python -m renderforge web` → `http://127.0.0.1:8770/`。四个页面，数据全部来自 `workspace/`（和 CLI 读同一份，不另存状态）：任务总览（每案例的阶段徽章、draw/网格/实例、VP 拟合、身份覆盖、右侧挂该案例的**参考帧缩略图**、5 s 轮询）、工作流（按来源的步骤图 + 每步真实结果 + 单步重跑/整条运行）、资源浏览器（模型按源资产名分组，缩略图由顶点在服务端渲染；纹理/材质可切；搜索）、场景结果（参考帧 + 各引擎截图、导入报告、SSIM/MAE/RMSE/p95/覆盖率/IoU、构建统计）。
+  - **模型预览**：悬停卡片 → 缓慢旋转的 3D 预览；点击 → 内置查看器（拖动旋转 / 滚轮缩放 / 右键平移）。**全页只有一个 WebGL 上下文**（浏览器上限约 16 个，每卡一个会坏），卡片借用/归还同一个 canvas，没有悬停时不渲染。几何走 `/api/meshbin`（直接发 `pos.f32` + `idx.u32` 字节，JSON 头补齐 4 字节对齐），不转 glTF。
+  - **three.js r186 内置**在 `renderforge/web/static/vendor/three/`（MIT，含 LICENSE），离线可用；`index.html` 的 importmap 指向 `three` / `three/addons/`。
+  - 验收：`scripts/dev/web_acceptance.py`，**32 项约 15–40 s**，含与 CLI 的数值一致（案例表/阶段/SSIM）、缩略图是真 PNG、模块依赖图闭合、缺失静态文件是真 404、`/img` 缩放、`/file` 越权拒绝、未知步骤/案例拒绝、作业生命周期、6 案例 × 5 端点渲染、结果页布局守卫。
+- **工作台（CLI/MCP 层，上一轮完成，仍在跑）**：
   - `renderforge/caseinfo.py` + `status [case] [--json]`：来源与 8 个阶段全按磁盘产物推断；单案例给数字与一条可执行 next；核对引擎工程（记录过导入但 map 不在了 → stale）。6 个案例目录都跑过。
   - `renderforge/pipeline.py` + `run <case> [--from S] [--to S] [--force]`：步骤顺序随来源；产物存在即跳过；缺输入带原因跳过；失败停止并打印续跑命令；build 选项（extra_export/extra_pass）持久化。
   - `renderforge/metrics.py` + `metrics`：SSIM/MAE/RMSE/p95/覆盖率误差/mask IoU/翻转检测；两个引擎的分数分别记主分与 `also`。
@@ -83,6 +87,11 @@
 - 绝区零：适配器已实现、矩阵验证过（72/213 draws，IoU 0.9783），但**未接 CLI、未端到端渲染**；头脸缺失（GPU 间接绘制）仍未绕过；游戏本机未安装，AnimeStudio 未重跑。
 - 原神/星铁：无数据，全未验证（档案 `coverage: extension`）。终末地：资源在加密 VFS，通用工具打不开，且有反作弊，未尝试注入。
 - Unity 源路线没有商业游戏样本。材质仅预览级。D3D12/Vulkan 未验证。Nsight/PIX 本机未装。
+- **Web 工作台的边界**：
+  - 截图在页面上是服务端缩放到 ≤1600 px 的副本（`/img`），不是截帧原始 3840×2160；1:1 看到的是 1600×900。要看原始像素需要另加"原始尺寸"链接。
+  - 资源浏览器的缩略图对植被/草叶这类散片网格不友好——3D 旋转不会让一堆独立草片变成"一个东西"；这是数据特性，不是渲染问题。
+  - 编辑器控制（L6）没有入口：页面能看和能跑流水线，不能在 UE/Unity 里改场景。
+  - 页面没有内嵌 Agent 对话；对话仍在 Claude 会话里，两边共享 `workspace/` 状态但不共享会话。
 - **工作台层的真实边界**：
   - `run` 不会交互式挑场景 pass：它按 survey 自动选“类 G-buffer”的 pass；要别的 pass 仍得显式 `export --range/--eids`（然后用 `run --from build`）。
   - `status` 的 next 是启发式：只建议不需要新输入的步骤；`identify` 只对 `SOURCE_INDEX_GAMES`（目前仅 wuwa）给出。
@@ -102,6 +111,7 @@
 3. **逐物体差异指标**：现在只有整帧数字，回答不了"哪栋楼不对"。按源资产名（`scene.json -> instances[].source.object`）对指标分组即可；`wuwa_bridge` 已有 18,579/19,192 个带名实例。
 4. **材质常量（真正的 PBR 路径）**：解码逐材质常量块（`ps3`）并映射到引擎参数；取代 ORM 那条路，是一个项目而不是一个任务。证据见 `docs/MATERIAL_SEMANTICS.md`。
 5. **收尾 MCP 会话级验收**：开一个全新 Claude 会话，只用 `renderforge` MCP 工具走 `doctor → plan → status → step(build) → metrics`；协议级已经过了，这一步验的是 Agent 在真实会话里会不会正确选工具。
+5b. **Web 工作台的可选增强**（用户已在用，按反馈增补）：截图"原始尺寸"链接（现在只给 ≤1600 px 副本）；资源点选后触发"只导入这个网格"（`import_scene.py` 已支持 `RF_ONLY_KIND` / `RF_HIDE_MESH`，但 Web 侧还没接）；页面内嵌 Agent 对话。
 6. （参考）长期项：ZZZ 头/脸（GPU 驱动间接绘制）、蒙皮网格、D3D12/Vulkan、Nsight/PIX、编辑器控制（L6）。
 
 **不要做的事**：（旧约定“不要把工作台做成 Web UI”已作废：用户明确要求本地可视化工作台，见 `renderforge/web/`；要求是**不复刻** Agent 已有的能力、不引入前端框架与构建步骤。）不要在没有实际跑过的情况下把新命令标成 OK；`docs/TOOLBOX.md` 只能由 `python -m renderforge docs` 生成；`case.json` 里的 `steps` 由步骤图写，不要手改成“ok”来绕过一次失败；不要手调灯光强度和曝光。
@@ -115,7 +125,12 @@
 - 安全边界：只允许 `RUNNABLE` 里列出的步骤；`/file` 与 `/img` 拒绝 `workspace/` 之外的路径；未知案例 404。
 - 缩略图：读 `pos.f32`/`idx.u32` 做正交投影 + 平面着色（`abs(dot(N,L))`，因为捕获几何没有可信绕序），采样上限 1200 三角形，按 (case, mesh, size) 缓存。实测 40k 顶点网格 0.19 s。
 - 踩过的坑：`aspect-ratio` 的缩略图放在 grid `auto` 行里高度会塌成 2 px，改用 `grid-auto-rows`；3840×2160 的参考帧直接给 `<img>` 会让离屏窗口不绘制，改走 `/img` 缩放到 1600 px。
-- 验收：`scripts/dev/web_acceptance.py`，26 项约 15 s，含与 CLI 的数值一致性、越权拒绝、作业生命周期、6×5 端点渲染。
+- 验收：`scripts/dev/web_acceptance.py`，**32 项**（约 15 s，冷启动首次 40 s），含与 CLI 的数值一致性、越权拒绝、作业生命周期、6×5 端点渲染、结果页布局守卫。
+- 本轮后续修复（用户反馈驱动，均已实测）：
+  - **结果页三张图被裁剪**：`.shots` 是 flex 纵向容器，子项默认 `flex-shrink:1`，三张高图被压扁后由 `.shot` 的 `overflow:hidden` 裁掉上下。改为 `flex: 0 0 auto`，容器滚动。验收加了布局守卫。
+  - **不能放大**：新增 `#lightbox` 对话框，点任意截图（含参考帧）按屏适配打开，再点切 1:1，`+`/`-` 切换，Esc 关闭，标题栏显示实际显示尺寸。
+  - **任务总览挂参考帧**：详情页右侧显示该案例的参考帧缩略图（点击放大），无截帧的案例（`unity_synth`）显示"无截帧（Unity 资源包来源）"而非空洞。
+  - 顺手修的 bug：`notes` 为空时 `pane.append(null)` 会打印字面 `null`；`/api/meshbin` 头长未对齐导致 `Float32Array` 构造失败；`/vendor/three/three.core.js` 漏拷且缺失静态文件返回 HTML 回退，浏览器报成难以定位的 "MIME type text/html"。
 
 ## 快速上手
 ```
@@ -132,6 +147,13 @@ git log --oneline -3
 .venv\Scripts\python.exe -m renderforge run <case> --force --from build
 ```
 MCP：`.mcp.json` 里的 `renderforge`；不知道下一步就先 `status`，长步骤用 `job_start`。skill 在 `.claude/skills/renderforge/SKILL.md`。
+
+可视化工作台：
+```
+.venv\Scripts\python.exe -m renderforge web        # http://127.0.0.1:8770/ ，Ctrl-C 停
+.venv\Scripts\python.exe scripts/dev/web_acceptance.py   # 32 项，自起一个服务器，不占 8770
+```
+`.claude/launch.json` 已配好（`renderforge-workbench`，固定 8770）；端口被占时预览工具会换端口，此时页面与 `launch.json` 不一致——先确认 `netstat -ano | grep 8770` 再看。
 
 已有案例（`status` 会实时给出）：`wuwa_bridge`（RenderDoc 帧 3422，含透明 pass 合并）、`wuwa_61250`（帧 61250）、`wuwa_f3422`（帧 3422 的早期全帧导出，1718 draw）、`wuwa_f3765`（19 draw 的小帧）、`zzz_frame01`（3DMigoto 角色）、`unity_synth`（Unity 合成包，回归夹具）。截图里程碑在 `docs/milestone_*.png`。
 

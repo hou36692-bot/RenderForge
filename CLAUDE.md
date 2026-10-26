@@ -55,6 +55,10 @@
   “材质链路通了”不等于“画面上看得见”。
 - **捕获的网格可能没有可用 UV**：鸣潮水面 `m0517` 的顶点缓冲 SRV 解出 `u` 恒为 1.0（SNORM 通道只有 13 个近似 0 的 u 值，UNORM ch0 全 1.0），
   材质对每个像素采样同一个 texel，整片渲成平色。平面看起来“材质坏了”时，先查 `has_uv` 与 UV 数值分布，再动材质。
+- **Web 工作台只有一个 WebGL 上下文**：`renderforge/web/static/viewer.js` 全页共享一个 `WebGLRenderer`，卡片悬停借用、移开归还；
+  浏览器上限约 16 个上下文，每卡一个会在十几个网格时就悄悄丢最旧的。几何走 `/api/meshbin` 直发 `pos.f32`/`idx.u32`（JSON 头补 4 字节对齐）。
+- **静态文件缺失必须 404，不能回退到 index.html**：SPA 回退会让缺 `.js` 被当成 HTML 返回，浏览器报成 "MIME type text/html"，离真正原因很远。
+- **flex 纵列里的图片会被压扁再被 `overflow:hidden` 裁掉**：`.shot` 必须 `flex: 0 0 auto`，否则三张图按比例裁剪（本次真实出现过）。
 - **贴图语义要从着色器读，不要从贴图长得像什么推断**：`rd_scripts/rf_extract.py` 有 `shaders` 模式（反汇编指定 draw 的 PS，`vs: true` 切 VS），
   必须显式给 eids，入口是 MCP 的 `step` 或直接调 `pipeline.step_shaders`（CLI 没有 `shaders` 子命令，`run` 也没有 `--eids`）。靠它确认了 WuWa 的“ORM”贴图其实是色调伴随贴图。
 

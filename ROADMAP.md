@@ -16,7 +16,9 @@ L4 场景包/空间  ████████░░ 80%  scene.json · ue↔unit
 L5 目标发射器   ███████░░░ 70%  UE 5.8 ✅ · Unity 6 ✅ · 材质底色/法线/遮罩 + 逐材质透明混合模式 🟡（12 个透明材质里 6 个 proven、5 个 judgement、1 个 skipped）
 L6 编辑器控制   ████░░░░░░ 40%  UE 官方 MCP ✅(读关卡) · Unity CLI/MCP 🟡 · funplay 两个 ⬜
 L7 验证         ████████░░ 80%  离屏截图+并排对比 ✅ · 数值指标(SSIM/MAE/覆盖率/IoU) ✅ · 离线回归夹具 ✅ · MCP 协议级验收 ✅ · 逐材质/逐物体差异 ⬜
-L8 编排         ████████░░ 80%  registry/games/recipes/doctor/plan/docs ✅ · 案例状态+可续跑步骤图 ✅ · MCP server ✅ · skill ✅(验收未独立跑) · 后台作业 ✅ · 日志统一在 workspace/_logs ✅
+L8 编排         █████████░ 90%  registry/games/recipes/doctor/plan/docs ✅ · 案例状态+可续跑步骤图 ✅ · MCP server ✅ · skill ✅(会话级验收未独立跑) · 后台作业 ✅ · 日志统一 ✅ · **本地 Web 工作台 ✅**(四页面 + 3D 资源预览)
+
+L9 可视化        ███████░░░ 70%  任务总览✅ · 工作流可视化✅ · 资源浏览器✅(缩略图+悬停3D+查看器) · 场景结果✅(不裁剪+放大) · Agent 对话未内嵌 ⬜ · 编辑器控制入口 ⬜
 ```
 
 ## 游戏 × 阶段 覆盖矩阵
@@ -88,6 +90,14 @@ L8 编排         ████████░░ 80%  registry/games/recipes/doc
 - ⚠ 边界：`run` 当前覆盖 RenderDoc / 3DMigoto / Unity 源三条步骤图，但**不会交互式选择场景 pass**——它按 survey 自动选“类 G-buffer”的 pass；要别的 pass 仍需显式 `export --range/--eids`。
 - `metrics` 在 `metrics.json -> also` 里同时记录两个引擎的分数（默认主分数取最新截图）；没有截帧参考的案例（`unity_synth`）无法打分。
 
+**阶段 B 可视化工作台（本轮完成，用户已在用）**
+- ✅ `python -m renderforge web`（`renderforge/web/`，标准库 `ThreadingHTTPServer` + 原生 JS，无框架无构建）→ `http://127.0.0.1:8770/`。
+- ✅ 页面：**任务总览**（阶段徽章、draw/网格/实例、VP 拟合、身份覆盖、该案例参考帧缩略图、5 s 轮询）、**工作流**（按来源的步骤图、每步真实结果、单步重跑/整条运行）、**资源浏览器**（模型按源资产名分组、服务端渲染缩略图、纹理/材质、搜索）、**场景结果**（参考帧 + 各引擎截图、导入报告、SSIM/MAE/RMSE/p95/覆盖率/IoU、构建统计）。
+- ✅ **3D 资源预览**：悬停缓慢旋转，点击打开轨道查看器。**全页单一 WebGL 上下文**（浏览器上限约 16，每卡一个会坏），按需借用/归还；几何走 `/api/meshbin` 直发 `pos.f32`+`idx.u32`（4 字节对齐），不转 glTF。three.js r186 内置（MIT），离线可用。
+- ✅ 服务端不持有状态：一切由 `workspace/` 经 `caseinfo`/`pipeline`/`jobs`/`metrics` 派生，页面与 CLI 不一致即为 bug。
+- ✅ 验收 `scripts/dev/web_acceptance.py` **32 项**（约 15 s）：与 CLI 数值一致、模块依赖图闭合、缺失静态文件真 404、`/img` 缩放、越权拒绝、未知步骤/案例拒绝、作业生命周期、6×5 端点渲染、结果页布局守卫。
+- ⚠ 边界：页面截图是 ≤1600 px 副本（非截帧原始分辨率）；资源按选触发导入未接（`RF_ONLY_KIND`/`RF_HIDE_MESH` 已在导入器里）；**Agent 对话未内嵌**；编辑器控制（L6）无入口；植被散片类网格 3D 预览仍像"一堆草叶"（数据特性）。
+
 **阶段 C（扩展）**
 - D3D12 / Vulkan 截帧验证；Nsight / PIX 作为 RenderDoc 抓不到时的后备评估
 - Unity 场景文件(.unity)与 prefab 变体、蒙皮网格与动画；UE 世界分区/FastGeo 布局
@@ -109,7 +119,8 @@ L8 编排         ████████░░ 80%  registry/games/recipes/doc
   按引擎目标不同指标只做记录，尚未用它做通过/不通过的阈值判定。**SSIM 是近似量**：可用来比较同一案例改前/改后，不能跨案例、跨游戏比优劣。
 - `selftest` 只覆盖本仓库已提交的夹具（unity_synth、wuwa_bridge、zzz_frame01 等）；夹具缺失时该项记为 skipped 而非失败，所以“6 passed”不代表覆盖任意新案例。
   其中 `toolbox-data` 检查 `docs/TOOLBOX.md` 是否比 toolbox 数据新；手改 TOOLBOX.md 或只改数据不重跑 `docs` 都会让它失败。
-- 工作台（status/run/metrics/selftest/MCP）已在 6 个真实案例目录上运行。MCP 面已做**协议级**验收（`scripts/dev/mcp_acceptance.py` 14/14，约 10 s，原始 JSON-RPC over stdio）；**“全新会话只用 MCP 工具走通”仍未做**。
+- 工作台（status/run/metrics/selftest/MCP）已在 6 个真实案例目录上运行。MCP 面已做**协议级**验收（`scripts/dev/mcp_acceptance.py` 16/16，约 38 s，原始 JSON-RPC over stdio，并含 CLI 一致性）；**“全新会话只用 MCP 工具走通”仍未做**。
+- **Web 工作台**已在真实案例上运行并截屏验证：四页面均读真实数据，3D 预览与查看器、结果页放大与不裁剪均实际点开过。但它只做"看 + 跑流水线"，**不做编辑**；页内没有 Agent 对话；没有权限/多用户概念（绑定 `127.0.0.1`，仅供本机）。
   两者不等价：协议测试证明工具能调通、与 CLI 一致，不证明一个 Agent 在真实会话里会正确选择它们。
 - 工作区已清理（4.0 GB → 3.1 GB）：删掉了五个临时探针目录（`_probe_light`、`_probe_lighting`、`_probe_particles`、`_probe_water`、`_zzz_probe`）、被取代的导出（`wuwa_bridge/export_transparent{,_2,_3}`、`export_depth`）、旧构建（`wuwa_f3422/build2`、`build3`）、`-backup-*` 日志与日志归档。
   保留：每个案例的 `export`/`build`/`shots`/`survey`/`ids`/`unity_pkg`/`_scene_*_space`，以及 `_logs`（每个流水线族最新一次）和 `_jobs`。**注意**：`renderforge/adapters/zzz.py` 的 docstring 仍指向 `workspace/zzz_probe/scripts/`，那个目录已被清理——要复现 ZZZ 探针需重写脚本（适配器本身的结论在 docstring 里数值完整）。

@@ -251,6 +251,18 @@ def main():
                 bad.append(f"{n}: reference is not an /img url")
         check("case-payload-shape", not bad, ", ".join(bad) or f"{len(cases)} cases")
 
+        # 10c. the result page's screenshots are aspect-correct and zoomable. A flex child that shrinks under its
+        # content gets cropped by its own overflow:hidden -- the image is served fine, so only a layout check sees it.
+        st, _, page = get(base, "/")
+        check("result-layout-guards", b"lightbox" in page and b"result-shots" in page, "dialog markup present")
+        css = get(base, "/app.css")[2].decode("utf-8", "replace")
+        # strip comments first: the rule is preceded by an explanatory one, so a naive block split misses it
+        css_nc = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        m = re.search(r"(^|\n)\.shot\s*\{([^}]*)\}", css_nc)
+        shot_rule = m.group(2) if m else ""
+        check("shot-does-not-shrink", "flex: 0 0 auto" in shot_rule,
+              " ".join(shot_rule.split())[:80] or "rule not found")
+
         # 11. every case renders its own pages without a 500
         broken = []
         for c in cases:

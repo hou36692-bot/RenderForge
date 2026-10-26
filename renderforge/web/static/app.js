@@ -378,13 +378,17 @@ function renderResult() {
   if (!d) { shots.append(h("div", { class: "placeholder", text: "先选择一个案例" })); return; }
 
   // URLs come from the server: building filesystem paths in the browser breaks on separators and escaping.
-  if (d.reference) {
-    shots.append(h("div", { class: "shot" }, h("h4", { text: "参考帧（游戏原帧）" }), h("img", { src: d.reference, alt: "reference" })));
-  }
+  const addShot = (label, url) => {
+    if (!url) return;
+    const img = h("img", { src: url, alt: label, loading: "lazy", title: "点击放大" });
+    img.addEventListener("click", () => openLightbox(label, url));
+    shots.append(h("div", { class: "shot" },
+      h("h4", {}, h("span", { text: label }), h("span", { class: "zoom", text: "点击放大" })),
+      img));
+  };
+  addShot("参考帧（游戏原帧）", d.reference);
   const shotList = d.shots || [];
-  for (const s of shotList) {
-    shots.append(h("div", { class: "shot" }, h("h4", { text: s.file }), h("img", { src: s.url, alt: s.file })));
-  }
+  for (const s of shotList) addShot(s.file, s.url);
   if (!shotList.length) {
     shots.append(h("div", { class: "placeholder", text: "还没有截图" }));
   }
@@ -414,6 +418,40 @@ function renderResult() {
     report.append(h("table", { class: "tbl" }, Object.entries(build.report).map(([k, v]) =>
       h("tr", {}, h("td", { text: k }), h("td", { text: fmt(v) })))));
   }
+}
+
+/* ---------- lightbox ---------- */
+
+function openLightbox(name, url) {
+  const dlg = $("#lightbox");
+  const body = dlg.querySelector(".lightbox-body");
+  const img = body.querySelector("img");
+  body.classList.remove("zoomed");
+  img.src = url;
+  img.alt = name;
+  dlg.querySelector(".name").textContent = name;
+  dlg.querySelector(".dims").textContent = "";
+  // The served image is a display-sized copy (<=1600 px), so report what is actually on screen rather than a
+  // capture resolution the viewer is not showing.
+  img.decode().then(() => {
+    dlg.querySelector(".dims").textContent = `${img.naturalWidth} x ${img.naturalHeight}`;
+  }).catch(() => {});
+  if (!dlg.open) dlg.showModal();
+}
+
+function wireLightbox() {
+  const dlg = $("#lightbox");
+  const body = dlg.querySelector(".lightbox-body");
+  const img = body.querySelector("img");
+  img.addEventListener("click", () => body.classList.toggle("zoomed"));
+  dlg.querySelector(".lightbox-close").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+  // keyboard: Esc closes (native), +/- zoom in and out of the fit state
+  dlg.addEventListener("keydown", (e) => {
+    if (e.key === "+" || e.key === "=") { body.classList.add("zoomed"); e.preventDefault(); }
+    if (e.key === "-") { body.classList.remove("zoomed"); e.preventDefault(); }
+  });
+  dlg.addEventListener("close", () => { img.src = ""; });
 }
 
 /* ---------- data flow ---------- */
@@ -463,6 +501,7 @@ function setView(v) {
 
 function boot() {
   MeshViewer.wireDialog();
+  wireLightbox();
   $$("#tabs button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
   $("#refresh").addEventListener("click", async () => {
     await loadCases();

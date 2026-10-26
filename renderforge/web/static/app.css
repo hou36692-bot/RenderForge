@@ -181,9 +181,38 @@ main { flex: 1; min-height: 0; }
 .result-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 22px; border-bottom: 1px solid var(--line); }
 .result-body { display: flex; flex: 1; min-height: 0; }
 .shots { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-.shot { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-.shot h4 { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line); }
-.shot img { display: block; width: 100%; height: auto; }
+/* flex:0 0 auto -- without it the column shrinks each .shot to fit, and the .shot's overflow:hidden then crops the
+   image top and bottom. The container scrolls instead. */
+.shot {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden; flex: 0 0 auto;
+}
+.shot h4 {
+  margin: 0; padding: 8px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+}
+.shot h4 .zoom { font-size: 11px; color: var(--dim); font-weight: 400; }
+.shot img { display: block; width: 100%; height: auto; cursor: zoom-in; }
+.shot img:hover { outline: 1px solid #3d444f; outline-offset: -1px; }
+
+/* full-size view: a dialog that fits the image to the screen and lets the page scroll when it is larger */
+dialog.lightbox {
+  width: 96vw; height: 94vh; max-width: none; max-height: none; margin: auto; padding: 0;
+  background: #0e1014; border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+dialog.lightbox::backdrop { background: rgba(6, 7, 9, .88); }
+dialog.lightbox[open] { display: flex; flex-direction: column; }
+.lightbox-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted);
+}
+.lightbox-head .name { color: var(--text); }
+.lightbox-head .dims { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--dim); }
+.lightbox-body { flex: 1; min-height: 0; overflow: auto; display: grid; place-items: center; background: #0b0d10; }
+.lightbox-body img { display: block; max-width: 100%; max-height: 100%; cursor: zoom-in; }
+.lightbox-body.zoomed { place-items: start; }
+.lightbox-body.zoomed img { max-width: none; max-height: none; cursor: zoom-out; }
+.lightbox-hint { padding: 6px 12px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
 .report { width: 400px; border-left: 1px solid var(--line); overflow-y: auto; padding: 16px 18px; background: var(--panel); }
 .diag { font-size: 12px; padding: 6px 10px; border-radius: var(--radius); margin-bottom: 6px; border-left: 3px solid var(--line); background: var(--panel-2); }
 .diag.ok { border-left-color: var(--ok); }

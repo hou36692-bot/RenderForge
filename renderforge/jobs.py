@@ -7,6 +7,7 @@ from a later session too (no in-process handles).
 """
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -27,16 +28,23 @@ def _job_id(argv):
     return f"{stamp}-{h}"
 
 
-def start(argv, name=None):
-    """Launch `python -m renderforge <argv>` detached; returns the job record (id, log path, pid)."""
+def start(argv, name=None, env=None, cwd=None):
+    """Launch `python -m renderforge <argv>` detached; returns the job record (id, log path, pid).
+
+    `env` adds to this process's environment (the web workbench uses it for UI-only switches such as RF_ONLY_KIND).
+    `cwd` defaults to the repository root, which the CLI resolves relative paths against."""
     JOBS.mkdir(parents=True, exist_ok=True)
     jid = _job_id(argv)
     meta = {"id": jid, "argv": list(argv), "name": name or argv[0], "started": time.time(),
             "log": str(JOBS / f"{jid}.log")}
+    if env:
+        meta["env"] = dict(env)
     (JOBS / f"{jid}.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
+    full_env = dict(os.environ, **(env or {}))
     log = open(meta["log"], "w", encoding="utf-8")
     p = subprocess.Popen([sys.executable, "-m", "renderforge.jobrun", jid, *argv],
-                         cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+                         cwd=cwd or ROOT, env=full_env, stdout=log, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL)
     meta["pid"] = p.pid
     (JOBS / f"{jid}.json").write_text(json.dumps(meta, indent=1), encoding="utf-8")
     return meta

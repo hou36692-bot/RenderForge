@@ -89,6 +89,7 @@
 |---|---|---|---|---|---|---|---|
 | RenderForge workbench (case status + resumable step graph) | renderforge-core | OK | direct | - | - | - | A stage is done only when its artifact exists on disk; a recorded import is cross-checked against the engine project. Steps that need input not on disk (identify index, capture path) are skipped with the reason. Build options that change the result (extra_export/extra_pass) persist in case.json and are reused on rebuild. |
 | RenderForge MCP server (stdio) + background jobs | renderforge-core | OK | direct | - | - | - | Standard library only; tools are thin wrappers over the CLI so output is identical. job_start writes workspace/_jobs/<id>.log plus an exit marker, so a later session can still read the outcome. Not yet exercised from a fresh Claude session through the harness. |
+| RenderForge workbench asset export (OBJ / GLB / texture / case zip) | renderforge-core | OK | direct | - | - | - | Derived from build/scene.json alone: no re-solving, no invented geometry. GLB is a single mesh per file with positional/normal/UV accessors (uint32 indices above 65535 vertices) and keeps the package top-left UV origin; OBJ flips V because OBJ is bottom-left. Whole-case zips ship scene.json verbatim, INSTANCES.csv, CAMERA.json, REPORT.md and the textures the exported meshes reference. Large cases run as a child process (renderforge.web.export_job) so the HTTP threads stay free. Materials are preview level, not the game shaders. |
 
 ## 游戏适配档案
 

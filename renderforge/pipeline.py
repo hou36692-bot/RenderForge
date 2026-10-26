@@ -24,7 +24,9 @@ def _case_dir(case):
 
 
 def load_case(case):
-    return caseinfo._json(_case_dir(case) / "case.json", {}) or {}
+    # fresh: every step reads case.json, mutates it (steps/build/identify records) and writes it back; a shared
+    # parsed copy would be changed under other readers
+    return caseinfo._json(_case_dir(case) / "case.json", {}, fresh=True) or {}
 
 
 def ensure_case(case):
@@ -159,7 +161,7 @@ def step_build(case, rt_count=None, extra_export=None, extra_pass="extra", **kw)
         extra_export = (c.get("build") or {}).get("extra_export")
     sc = build(_case_dir(case) / "export", _case_dir(case) / "build", filt,
                extra_export=extra_export, extra_pass=extra_pass)
-    ident = caseinfo._json(_case_dir(case) / "draw_identity.json")
+    ident = caseinfo._json(_case_dir(case) / "draw_identity.json", fresh=True)
     if ident:
         # a rebuild writes a fresh scene.json, so re-apply the identity this case already established; otherwise a
         # rebuild silently un-names every mesh and drops the water/translucent kind tags that depend on it
@@ -211,7 +213,9 @@ def step_ue_import(case, max_instances=None, emissive=False, **kw):
     if emissive:
         extra["RF_EMISSIVE"] = "1"
     rc, logp = run("import_scene.py", extra, log=f"ue_import_{case}.log")
-    res = caseinfo._json(Path(scene_dir) / "ue_import_result.json", {}) or {}
+    # fresh: convert_scene deletes and recreates this directory, so an unchanged file can carry a new mtime and a
+    # size-keyed cache would answer with the copy it held from before the import
+    res = caseinfo._json(Path(scene_dir) / "ue_import_result.json", {}, fresh=True) or {}
     if not res.get("ok"):
         _fail(case, "emit-ue", f"rc={rc} log={logp}")
         raise RuntimeError(f"UE import failed (rc={rc}); see {logp}")
@@ -229,7 +233,7 @@ def step_unity_import(case, **kw):
     rc, logp = run("RFImportScene.Run", {"RF_UNITY_PKG": str(pkg),
                                          "RF_UNITY_SHOT": str(shots / f"{case}_unity.png")},
                    log=f"unity_import_{case}.log", graphics=True)
-    res = caseinfo._json(pkg / "unity_import_result.json", {}) or {}
+    res = caseinfo._json(pkg / "unity_import_result.json", {}, fresh=True) or {}
     if not res.get("ok"):
         _fail(case, "emit-unity", f"rc={rc} log={logp}")
         raise RuntimeError(f"Unity import failed (rc={rc}); see {logp}")

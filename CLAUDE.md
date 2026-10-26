@@ -61,5 +61,29 @@
 - **flex 纵列里的图片会被压扁再被 `overflow:hidden` 裁掉**：`.shot` 必须 `flex: 0 0 auto`，否则三张图按比例裁剪（本次真实出现过）。
 - **贴图语义要从着色器读，不要从贴图长得像什么推断**：`rd_scripts/rf_extract.py` 有 `shaders` 模式（反汇编指定 draw 的 PS，`vs: true` 切 VS），
   必须显式给 eids，入口是 MCP 的 `step` 或直接调 `pipeline.step_shaders`（CLI 没有 `shaders` 子命令，`run` 也没有 `--eids`）。靠它确认了 WuWa 的“ORM”贴图其实是色调伴随贴图。
+- **小的 HTTP 服务不要用 `BaseHTTPRequestHandler` 的默认协议**：默认是 HTTP/1.0（每请求关连接）且开着 Nagle，
+  浏览器要连 75 次拿缩略图时每次多 ~40 ms 的延迟 ACK 停顿。设 `protocol_version="HTTP/1.1"` + `disable_nagle_algorithm=True` 后，
+  同一批缩略图 30 张冷渲染从 ~1.4 s 降到 92 ms。
+- **`src` 里的 JSON 解析要缓存，但 `case.json` 必须 `fresh=True`**：`caseinfo._json` 按 (路径, 大小, mtime_ns) 缓存，
+  一个 20 MB 的 scene.json 解析要 0.15 s、占约 40 MB；`scan` 每个请求会调两次。写后原地改的文件（`pipeline.load_case`）
+  和“删目录重建同字节”的文件（`convert_scene` 后的 `ue_import_result.json`）要绕开缓存，否则拿到共享对象被改。
+- **Windows 上不能用 `os.kill(pid, 0)` 探活**：Python 3.12 实测它对活进程返回成功，对已死进程**也不抛异常**（等于永远“活着”）。进程状态只按记录推进判断。
+- **参考帧上的“点哪找哪”靠的是相机 + 实例矩阵，不需要深度缓冲**（`renderforge/web/locate.py`）：
+  相机装配射线，先用每个实例投影包围盒筛候选，再对候选网格逐三角形求交，按距离排序。实测 535 网格的帧每次 8–20 ms。
+  验证方式：点桥拱 → `SM_Old_Bri_01AH`，点树冠 → `SM_Old_Tre_01CL`；把已知变体的包围盒画回参考帧，位置对得上。
+  画面正中可能**没有几何**（天空或相机近似导致的缝隙），所以验收是散点探测（6 个点至少 3 个命中），不是只点中心。
+- **贴近相机的命中有毒**：`xm0023`（透明，全屏，深度 0.1 m）挡在所有点击前面，它是天空壳一类的东西。
+  `pick` 用 `near_camera`（<1 m）标出来并排到末尾，**不要直接丢弃**——网格确实在那里。
+- **资产分类不要从名字猜语义**：WuWa 的 `SM_<前缀>_<类别码>_<编号><后缀>` 里只有少数类别码有证据
+  （`Bri` 桥 / `Tre` 树 / `Wat` 水 / `Veg`·`Gra` 植被草，证据在 `locate.CODE_LABEL` 旁注）。其余原样展示代号，不翻译。
+  分组维度：源资产名 / 类别码 / 关卡目录 / 渲染方式（`m` 静态、`x` 透明 pass、`b` 烘焙——**与本案例的 kind 一一对应**）/ 未知分组 / 屏幕占比。
+- **未识别网格不是噪声**：`wuwa_bridge` 535 个里 287 个没有源名，其中 260 个在画面上。它们按“共用底色贴图”再分组
+  （27/19/15 个网格共一张图），这比按 mesh id 有用得多。
+- **案例的“目录 id”和“显示名”必须分开**：UE 资产路径 `/Game/RenderForge/<case>`（`import_scene.py` 的 `ROOT`）、
+  Unity 的 `Assets/RF/<case>`（`RFImportScene.cs`）、截图与 metrics 记录的文件名全部由目录名派生，
+  **改目录名会让已有引擎导入失联**。所以重命名只写 `case.json -> title`（`caseinfo.scan` 返回 `title`，回退到目录名），
+  页面同时显示目录 id。新建任务时目录 id 只允许 `[A-Za-z0-9._-]`，且不能用 `_` 开头。
+- **新建任务不复制 .rdc**：截帧常有 1–2 GB，页面上只能填**本机已有路径**（`casectl.look` 先读 4 字节 `RDOC` 魔数确认），
+  在 `workspace/<id>/` 下只写一个 `case.json`，然后立刻把 `survey` 作为普通后台作业启动。大文件上传没有做，也不需要做。
 
 ## 已知限制 / 待办见 ROADMAP.md

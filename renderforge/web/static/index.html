@@ -42,7 +42,13 @@
   <!-- 任务总览 -->
   <section id="view-overview" class="view active">
     <div class="split">
-      <aside class="cases" id="case-list"></aside>
+      <aside class="cases">
+        <div class="case-tools">
+          <button id="btn-new-case" class="primary" title="从一个 .rdc 截帧新建任务">+ 新建任务</button>
+          <input id="case-filter" type="search" placeholder="过滤任务…">
+        </div>
+        <div id="case-list"></div>
+      </aside>
       <div class="pane" id="case-main">
         <div class="placeholder">从左侧选择一个案例</div>
       </div>
@@ -79,12 +85,38 @@
           <button data-kind="textures">纹理</button>
           <button data-kind="materials">材质</button>
         </div>
+        <div class="seg" id="export-bar">
+          <button id="btn-export-obj" title="把当前筛选结果里的网格（或当前分组）打成 OBJ+贴图 zip">导出 OBJ</button>
+          <button id="btn-export-glb" title="同上，GLB（单文件，不带贴图）">导出 GLB</button>
+        </div>
       </div>
+    </div>
+    <!-- locate: the flow the whole tab is built around is "look at the frame, name the asset, export it" -->
+    <div class="locate-bar" id="locate-bar">
+      <button id="btn-pick" class="primary" title="在参考帧上点一下，定位到那里的网格">🔍 在画面上定位</button>
+      <span class="locate-sep"></span>
+      <button class="chip-toggle" data-filter="inFrame" title="只保留在参考帧里可见的网格（包围盒与画面相交）">画面内</button>
+      <button class="chip-toggle" data-area="0.05" title="只保留投影包围盒占画面 5% 以上的网格">画面 &gt;5%</button>
+      <button class="chip-toggle" data-area="0.01" title="只保留投影包围盒占画面 1% 以上的网格">画面 &gt;1%</button>
+      <span class="locate-sep"></span>
+      <select id="group-by" title="左侧列表的分组依据">
+        <option value="source">分组：源资产名</option>
+        <option value="code">分组：资产类别码</option>
+        <option value="level">分组：关卡目录</option>
+        <option value="kind">分组：渲染方式</option>
+        <option value="unknown">分组：未知资产</option>
+        <option value="area">分组：屏幕占比</option>
+      </select>
+      <button class="chip-toggle" data-named="no" title="只看没能匹配到源资产名的网格（按共用贴图/屏幕占比再分组）">只看未知</button>
+      <button id="btn-clear-filters" class="ghost" title="清除全部筛选">清除筛选</button>
+      <span id="filter-summary" class="filter-summary"></span>
     </div>
     <div class="assets-body">
       <aside class="groups" id="asset-groups"></aside>
       <div class="grid" id="asset-grid"></div>
+      <aside class="related" id="asset-related"></aside>
     </div>
+    <div id="export-status" class="export-status"></div>
   </section>
 
   <!-- 场景结果 -->
@@ -110,11 +142,84 @@
     </div>
     <div class="viewer-meta">
       <span class="viewer-info"></span>
+      <a class="viewer-dl ghost" download title="下载这个网格">OBJ</a>
+      <a class="viewer-dl ghost" download title="下载这个网格">GLB</a>
       <button class="viewer-close ghost" title="关闭（Esc）">关闭</button>
     </div>
   </div>
   <div class="viewer-stage"></div>
   <div class="viewer-hint">拖动旋转 · 滚轮缩放 · 右键平移</div>
+</dialog>
+
+<dialog id="newcase" class="newcase">
+  <div class="newcase-head">
+    <div class="newcase-title">新建任务</div>
+    <button class="newcase-close ghost" title="关闭（Esc）">关闭</button>
+  </div>
+  <div class="newcase-body">
+    <p class="newcase-note">
+      填截帧在本机上的完整路径（.rdc 通常有 1–2 GB，页面不复制它，只在 <code>workspace/</code> 下登记一个任务目录）。
+      新建后自动跑「截帧分析」，之后在工作流里继续。
+    </p>
+    <label class="newcase-row">
+      <span>截帧文件</span>
+      <input id="nc-rdc" type="text" placeholder="D:\...\WutheringWaves_dx11_..._frame3422.rdc" spellcheck="false">
+    </label>
+    <button id="nc-inspect" class="ghost">检查文件</button>
+    <div id="nc-info" class="newcase-info"></div>
+    <label class="newcase-row">
+      <span>任务 id</span>
+      <input id="nc-id" type="text" placeholder="wuwa-f3422" spellcheck="false">
+      <em>目录名，创建后不改；引擎资产路径由它派生</em>
+    </label>
+    <label class="newcase-row">
+      <span>显示名</span>
+      <input id="nc-title" type="text" placeholder="鸣潮 · 桥上（可留空，之后随时改）" spellcheck="false">
+    </label>
+  </div>
+  <div class="newcase-foot">
+    <span id="nc-status" class="newcase-status"></span>
+    <button id="nc-create" class="primary" disabled>创建任务</button>
+  </div>
+</dialog>
+
+<dialog id="rename" class="newcase">
+  <div class="newcase-head">
+    <div class="newcase-title">重命名任务</div>
+    <button class="rename-close ghost" title="关闭（Esc）">关闭</button>
+  </div>
+  <div class="newcase-body">
+    <p class="newcase-note">
+      只改显示名。目录名 <code id="rn-case"></code> 保持不变——UE 的 <code>/Game/RenderForge/&lt;目录名&gt;</code>、
+      Unity 的 <code>Assets/RF/&lt;目录名&gt;</code> 和已生成的截图文件名都由它派生，改目录名会让已有的引擎导入失联。
+    </p>
+    <label class="newcase-row">
+      <span>显示名</span>
+      <input id="rn-title" type="text" placeholder="留空则显示目录名" spellcheck="false">
+    </label>
+  </div>
+  <div class="newcase-foot">
+    <span id="rn-status" class="newcase-status"></span>
+    <button id="rn-save" class="primary">保存</button>
+  </div>
+</dialog>
+
+<dialog id="picker" class="picker">
+  <div class="picker-head">
+    <div>
+      <div class="picker-title">在参考帧上定位资产</div>
+      <div class="picker-dims"></div>
+    </div>
+    <button class="picker-close ghost" title="关闭（Esc）">关闭</button>
+  </div>
+  <div class="picker-body">
+    <div class="picker-stage">
+      <img alt="参考帧">
+      <span class="picker-mark"></span>
+    </div>
+    <aside class="picker-hits"></aside>
+  </div>
+  <div class="picker-hint">点击画面定位到该处最近的几何 · 相机与 fov 是拟合出来的，画面边缘可能差几个像素</div>
 </dialog>
 
 <dialog id="lightbox" class="lightbox">

@@ -201,6 +201,13 @@ const MeshViewer = (() => {
     const info = dlg.querySelector(".viewer-info");
     const nv = geo.attributes.position.count, ni = geo.index ? geo.index.count : 0;
     info.textContent = `${nv.toLocaleString()} 顶点 · ${(ni / 3).toLocaleString()} 三角形`;
+    // Download what is on screen: the same mesh the server would export, not a re-encoding of the browser's copy.
+    const links = dlg.querySelectorAll(".viewer-dl");
+    for (const a of links) {
+      const fmt = a.textContent.trim().toLowerCase();
+      a.href = `/api/export/mesh?case=${encodeURIComponent(caseName)}&mesh=${encodeURIComponent(meshId)}&fmt=${fmt}`;
+      a.textContent = `下载 ${fmt.toUpperCase()}`;
+    }
   }
 
   function close() {

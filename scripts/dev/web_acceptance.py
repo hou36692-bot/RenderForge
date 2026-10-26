@@ -9,11 +9,14 @@ Runs its own server on a free port, so it is safe alongside a workbench you alre
 """
 import json
 import os
+import re
 import socket
+import struct
 import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -35,9 +38,21 @@ def free_port():
     return p
 
 
+def request(base, path, timeout=60, accept_encoding="gzip"):
+    """(status, headers, body) with gzip decoded, so byte-level checks see the payload the page sees."""
+    req = urllib.request.Request(base + path, headers={"Accept-Encoding": accept_encoding,
+                                                       "User-Agent": "rf-acceptance"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        body = r.read()
+        if (r.headers.get("Content-Encoding") or "") == "gzip":
+            import gzip
+            body = gzip.decompress(body)
+        return r.status, r.headers, body
+
+
 def get(base, path, timeout=60):
-    with urllib.request.urlopen(base + path, timeout=timeout) as r:
-        return r.status, r.headers.get("Content-Type") or "", r.read()
+    st, h, body = request(base, path, timeout=timeout)
+    return st, (h.get("Content-Type") or ""), body
 
 
 def get_json(base, path):
@@ -90,7 +105,6 @@ def main():
         # 1b. the module graph is closed: every relative import in the vendored three.js files resolves to a real
         # file served as JavaScript. A missing one is answered with a real 404 (not the HTML fallback), because the
         # browser reports the HTML version as an opaque MIME-type error far from the cause.
-        import re
         todo, seen, broken = ["/vendor/three/three.module.js", "/vendor/three/addons/controls/OrbitControls.js"], set(), []
         while todo:
             u = todo.pop()
@@ -197,6 +211,203 @@ def main():
               f"{len(rep['diagnostics'])} items")
         check("report-has-metrics", bool(rep.get("metrics")), f"ssim={rep.get('metrics', {}).get('ssim')}")
 
+        # 7b. export: what comes back must be openable, not just "200 with bytes". GLB is checked structurally
+        # (magic, chunk lengths, bufferViews inside the buffer, index width vs vertex count); OBJ by counting the
+        # faces its own header promises; the texture by decoding it.
+        # the largest mesh, not the first: it exercises the uint32 index path and the OBJ writer at real size
+        mesh_rec = max(assets["meshes"], key=lambda m: m.get("verts") or 0)
+        mid = mesh_rec["id"]
+        st, ct, glb = get(base, f"/api/export/mesh?case={name}&mesh={mid}&fmt=glb")
+        bad = []
+        if ct != "model/gltf-binary" or glb[:4] != b"glTF":
+            bad.append("not a glb")
+        else:
+            magic, ver, total = struct.unpack("<III", glb[:12])
+            jlen, jtype = struct.unpack("<II", glb[12:20])
+            doc = json.loads(glb[20:20 + jlen])
+            blen, btype = struct.unpack("<II", glb[20 + jlen:28 + jlen])
+            if total != len(glb) or 28 + jlen + blen != len(glb):
+                bad.append(f"lengths {total}/{len(glb)} and {28 + jlen + blen}")
+            if jtype != 0x4E4F534A or btype != 0x004E4942:
+                bad.append("chunk types")
+            acc, views = doc["accessors"], doc["bufferViews"]
+            for v in views:
+                if v["byteOffset"] + v["byteLength"] > doc["buffers"][0]["byteLength"]:
+                    bad.append("bufferView outside buffer")
+            prim = doc["meshes"][0]["primitives"][0]
+            nv = acc[prim["attributes"]["POSITION"]]["count"]
+            ni = acc[prim["indices"]]["count"]
+            if nv != mesh_rec["verts"]:
+                bad.append(f"glb verts {nv} vs scene {mesh_rec['verts']}")
+            want_type = 5125 if nv > 65535 else 5123
+            if acc[prim["indices"]]["componentType"] != want_type:
+                bad.append(f"index type for {nv} verts")
+            if ni != mesh_rec["tris"] * 3:
+                bad.append(f"glb indices {ni} vs tris {mesh_rec['tris']}*3")
+        check("export-glb-well-formed", not bad, "; ".join(bad) or f"{mesh_rec['verts']}v {len(glb) // 1024} KB")
+
+        st, ct, obj = get(base, f"/api/export/mesh?case={name}&mesh={mid}&fmt=obj")
+        text = obj.decode("utf-8", "replace")
+        nv_obj = sum(1 for ln in text.splitlines() if ln.startswith("v "))
+        nf_obj = sum(1 for ln in text.splitlines() if ln.startswith("f "))
+        check("export-obj-faces", st == 200 and nv_obj == mesh_rec["verts"] and nf_obj == mesh_rec["tris"],
+              f"{nv_obj} v, {nf_obj} f vs scene {mesh_rec['verts']}v {mesh_rec['tris']}f")
+        # a browser only treats the click-to-download links as downloads when the response says so
+        st, h, _ = request(base, f"/api/export/mesh?case={name}&mesh={mid}&fmt=obj")
+        disp = h.get("Content-Disposition") or ""
+        check("export-sends-content-disposition", st == 200 and "attachment" in disp and f"{mid}" in disp,
+              disp[:80] or "header missing")
+
+        tex_rec = next((t for t in assets["textures"] if t.get("export")), None)
+        if tex_rec:
+            st, ct, png = get(base, tex_rec["export"])
+            check("export-texture-is-png", st == 200 and png[:8] == b"\x89PNG\r\n\x1a\n", f"{len(png) // 1024} KB")
+
+        # the synchronous case zip: a real archive whose manifest counts match the scene
+        st, ct, zbytes = get(base, f"/api/export/case?case={name}&fmt=obj&meshes={mid}&textures=0", timeout=300)
+        import io
+        import zipfile
+        z = zipfile.ZipFile(io.BytesIO(zbytes))
+        names = z.namelist()
+        # the exporter names a mesh after its source asset (plus its id), which is the point of the export
+        named = any(n.startswith("meshes/") and mid in n for n in names)
+        check("export-case-zip", ct == "application/zip" and z.testzip() is None and named,
+              f"{len(names)} files, {len(zbytes) // 1024} KB")
+        check("export-case-zip-scene-json", json.loads(z.read("scene.json"))["meshes"].keys() == sc["meshes"].keys(),
+              "scene.json is the package's own, verbatim")
+
+        # the async job the buttons use: start, wait, then download the zip it wrote
+        code, body = post(base, f"/api/case/{name}/export",
+                          {"fmt": "glb", "meshes": mid, "textures": False})
+        ejid = (body.get("job") or {}).get("id")
+        check("export-job-starts", code == 200 and bool(ejid), f"export {ejid}")
+        if ejid:
+            for _ in range(180):
+                est = get_json(base, f"/api/export/{ejid}")
+                if est.get("state") in ("done", "failed"):
+                    break
+                time.sleep(0.5)
+            check("export-job-finishes", est.get("state") == "done",
+                  f"state={est.get('state')} {est.get('error') or ''} {est.get('seconds')}s")
+            st, ct, z2 = get(base, f"/export/download?id={ejid}", timeout=300)
+            check("export-job-downloads", st == 200 and z2[:2] == b"PK" and ct == "application/zip",
+                  f"{len(z2) // 1024} KB")
+            try:
+                get(base, "/export/download?id=..%2F..%2Fpyproject")
+                check("export-download-refuses-bad-id", False, "bad id served")
+            except urllib.error.HTTPError as e:
+                check("export-download-refuses-bad-id", e.code in (400, 404), f"HTTP {e.code}")
+
+        # 7c. locating on the reference frame: the served geometry must project the way the page assumes, and the
+        # facets the filters use must agree with scene.json (no invented categories, no invented coverage)
+        cam = assets.get("camera") or {}
+        facets = assets.get("facets") or {}
+        check("assets-camera-reports-why", "ok" in cam and (cam["ok"] or cam.get("why")),
+              f"ok={cam.get('ok')} vp_match={cam.get('vp_match')}")
+        rows_by_id = {m["id"]: m for m in assets["meshes"]}
+        check("assets-named-count", facets.get("named") == sum(1 for m in assets["meshes"] if m.get("named")),
+              f"{facets.get('named')} named, {facets.get('unnamed')} unnamed")
+        check("assets-in-frame-subset", 0 < facets.get("in_frame", 0) <= len(assets["meshes"]),
+              f"{facets.get('in_frame')} of {len(assets['meshes'])} on screen")
+        # every filter chip the page can show must map to rows that actually exist
+        bad = [c["code"] for c in facets.get("codes", [])
+               if not any(m.get("code") == c["code"] for m in assets["meshes"])]
+        check("assets-codes-resolve", not bad, ", ".join(bad) or f"{len(facets.get('codes', []))} codes")
+        kinds = {m["kind"] for m in assets["meshes"]}
+        check("assets-kinds-known", kinds <= {"static", "translucent", "baked", "water"}, str(sorted(kinds)))
+
+        if cam.get("ok"):
+            # A pick must hit *somewhere* on a scene, but "the centre of the frame" is not guaranteed to be geometry
+            # (it can be sky, or a spot the approximate camera puts between two objects). So probe a spread of points
+            # and require that the service answers coherently on all of them and hits on at least a few.
+            probes = [(0.2, 0.4), (0.5, 0.7), (0.7, 0.6), (0.3, 0.5), (0.8, 0.5), (0.5, 0.3)]
+            got, misses = [], 0
+            for px, py in probes:
+                pk = get_json(base, f"/api/pick?case={name}&x={px}&y={py}")
+                if pk.get("ok") and pk.get("hits"):
+                    got.append(pk)
+                elif pk.get("ok"):
+                    misses += 1
+            ok_shape = all(isinstance(pk.get("hits"), list) and all(
+                {"mesh", "depth_m", "kind", "near_camera"} <= set(h0) for h0 in pk["hits"]) for pk in got)
+            check("pick-probes", ok_shape and len(got) >= 3,
+                  f"{len(got)} of {len(probes)} probes hit geometry, {misses} landed on nothing")
+            pk = max(got, key=lambda p: len(p["hits"])) if got else {"hits": []}
+            depths = [h0["depth_m"] for h0 in pk["hits"] if not h0["near_camera"]]
+            check("pick-depths-monotone", depths == sorted(depths), f"{[round(d, 1) for d in depths[:4]]}")
+            check("pick-meshes-exist", all(h0["mesh"] in rows_by_id for h0 in pk["hits"]), "all hits are scene meshes")
+            # a pick that names a mesh must link it back to its material and textures -- that is the whole flow
+            real = next((h0 for h0 in pk["hits"] if not h0["near_camera"]), None)
+            if real:
+                rel = get_json(base, f"/api/related?case={name}&mesh={real['mesh']}")
+                check("related-has-links", rel.get("mesh") == real["mesh"] and bool(rel.get("materials")),
+                      f"{len(rel.get('materials') or [])} materials, {len(rel.get('textures') or [])} textures")
+            try:
+                get(base, f"/api/pick?case={name}&x=abc&y=0.5")
+                check("pick-rejects-bad-coords", False, "accepted a non-numeric x")
+            except urllib.error.HTTPError as e:
+                check("pick-rejects-bad-coords", e.code == 400, f"HTTP {e.code}")
+        # a case whose camera cannot locate must say so instead of returning confident hits
+        for c in cases:
+            a2 = get_json(base, f"/api/case/{c['case']}/assets")
+            if a2.get("ok") and (a2.get("camera") or {}).get("ok") is False:
+                pk2 = get_json(base, f"/api/pick?case={c['case']}&x=0.5&y=0.5")
+                check("pick-refuses-without-camera", pk2.get("ok") is False and bool(pk2.get("why")),
+                      f"{c['case']}: {pk2.get('why')}")
+                break
+
+        # 7d. task management: a capture can be inspected and a case created from it, and a display name can be set.
+        # Uses its own scratch case and removes it, so the real cases are untouched (this test must stay rerunnable).
+        probe = "rf-acceptance-probe"
+        real_rdc = None
+        for c in cases:
+            cj = ROOT / "workspace" / c["case"] / "case.json"
+            try:
+                rec = json.loads(cj.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            p = rec.get("rdc")
+            if p and Path(p).is_file():
+                real_rdc = p
+                break
+        if real_rdc:
+            cap = get_json(base, f"/api/capture?path={urllib.parse.quote(real_rdc)}")
+            check("capture-inspect", cap.get("ok") is True and cap.get("capture", {}).get("frame"),
+                  f"frame {cap.get('capture', {}).get('frame')} size {cap.get('size')}")
+            bad = get_json(base, f"/api/capture?path={urllib.parse.quote(str(ROOT / 'pyproject.toml'))}")
+            check("capture-refuses-non-rdc", bad.get("ok") is False and "rdc" in (bad.get("why") or "").lower(),
+                  bad.get("why") or "")
+            try:
+                code, body = post(base, "/api/cases", {"case": probe, "rdc": real_rdc, "title": "验收测试"})
+                made = code == 200 and body.get("ok")
+                check("case-create", made, f"{probe} -> {code}")
+                if made:
+                    lst = get_json(base, "/api/cases")["cases"]
+                    row = next((c for c in lst if c["case"] == probe), None)
+                    check("case-create-listed", bool(row) and row.get("title") == "验收测试",
+                          f"title={row.get('title') if row else None}")
+                    code, body = post(base, f"/api/case/{probe}/title", {"title": "改名后"})
+                    lst = get_json(base, "/api/cases")["cases"]
+                    row = next((c for c in lst if c["case"] == probe), None)
+                    check("case-rename", code == 200 and row and row.get("title") == "改名后",
+                          f"title={row.get('title') if row else None}")
+                    # the directory id must not change: engine asset paths are built from it
+                    check("case-rename-keeps-dir", (ROOT / "workspace" / probe).is_dir(),
+                          "directory untouched")
+                    code, body = post(base, "/api/case/probe-does-not-exist/title", {"title": "x"})
+                    check("case-rename-unknown-404", code == 404, f"HTTP {code}")
+            finally:
+                import shutil
+                shutil.rmtree(ROOT / "workspace" / probe, ignore_errors=True)
+            check("case-create-duplicate-refused",
+                  post(base, "/api/cases", {"case": name, "rdc": real_rdc})[0] == 400,
+                  "existing case refused")
+            check("case-create-bad-id-refused",
+                  post(base, "/api/cases", {"case": "../evil", "rdc": real_rdc})[0] == 400, "path traversal refused")
+        page = get(base, "/")[2].decode("utf-8", "replace")
+        check("new-task-ui-present", 'id="btn-new-case"' in page and 'id="newcase"' in page and 'id="rename"' in page,
+              "new task + rename markup")
+
         # 8. unknown steps are refused (the tool surface stays as narrow as the MCP server's)
         code, body = post(base, f"/api/case/{name}/run", {"step": "rm -rf"})
         check("run-refuses-unknown-step", code == 400, f"HTTP {code}")
@@ -228,7 +439,6 @@ def main():
             check("job-log-available", "rf-job" in log or "metrics" in log, f"{len(log)} chars")
 
         # 10a. the 3D viewer's data endpoint: raw geometry, correctly framed and 4-byte aligned
-        import struct
         st, ct, raw = get(base, f"/api/meshbin?case={name}&mesh={mesh}")
         hlen = struct.unpack("<I", raw[:4])[0]
         hdr = json.loads(raw[4:4 + hlen])

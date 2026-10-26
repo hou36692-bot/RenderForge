@@ -6,6 +6,7 @@
 构建以 Claude Code 对话为入口的**多游戏、多引擎图形资源重建工具箱**（不是单一 RenderDoc→UE Demo）。范围以 Unity + Unreal 为主，UE 5.8 与 Unity 6000.0.83f1 同为已验证目标。要求：建立工具能力地图、区分通用截帧/游戏专用提取/模组工具/资源解包、复用成熟项目、游戏适配器互相隔离、区分"已验证"与"理论可行"、文档和路线图如实。用户不熟悉工程细节：自主决策，说明简洁，关键进展简短汇报，不要声称没跑过的功能完成。原始 .rdc/游戏文件只读，生成物放 `workspace/<case>/`。
 
 **本次交接的方向（用户明确要求）**：文档要与实际状态一致。本轮（2026-10-25/26）在上一轮的 CLI/工作台之上，新增了**本地可视化工作台**（本地 Web UI：任务总览 / 工作流 / 资源浏览器 / 场景结果），并按用户反馈迭代了资源预览（悬停 3D 旋转 + 内置查看器）和结果页（不再裁剪 + 点击放大）。
+**之后一轮（2026-10-26 晚）**：资源浏览器加了**导出**（单网格 OBJ/GLB、贴图 PNG、整案例 zip/后台作业），并做了**加载性能优化**（JSON 解析缓存、缩略图落盘缓存、HTTP/1.1 keep-alive、gzip、ETag；数字见 ROADMAP「加载性能」）。验收脚本从 32 项扩到 63 项。
 **下一会话的主线**：把 ZZZ 适配器接进 CLI 并端到端渲染（见 Next Steps 第 1 项）；Web 工作台本身已可用，不进主线，只在需要时增量改。
 
 ## Current Progress（均在本机实际跑过，除非注明）
@@ -23,7 +24,8 @@
 - **本地可视化工作台（本轮新增，已实际跑过）**：`python -m renderforge web` → `http://127.0.0.1:8770/`。四个页面，数据全部来自 `workspace/`（和 CLI 读同一份，不另存状态）：任务总览（每案例的阶段徽章、draw/网格/实例、VP 拟合、身份覆盖、右侧挂该案例的**参考帧缩略图**、5 s 轮询）、工作流（按来源的步骤图 + 每步真实结果 + 单步重跑/整条运行）、资源浏览器（模型按源资产名分组，缩略图由顶点在服务端渲染；纹理/材质可切；搜索）、场景结果（参考帧 + 各引擎截图、导入报告、SSIM/MAE/RMSE/p95/覆盖率/IoU、构建统计）。
   - **模型预览**：悬停卡片 → 缓慢旋转的 3D 预览；点击 → 内置查看器（拖动旋转 / 滚轮缩放 / 右键平移）。**全页只有一个 WebGL 上下文**（浏览器上限约 16 个，每卡一个会坏），卡片借用/归还同一个 canvas，没有悬停时不渲染。几何走 `/api/meshbin`（直接发 `pos.f32` + `idx.u32` 字节，JSON 头补齐 4 字节对齐），不转 glTF。
   - **three.js r186 内置**在 `renderforge/web/static/vendor/three/`（MIT，含 LICENSE），离线可用；`index.html` 的 importmap 指向 `three` / `three/addons/`。
-  - 验收：`scripts/dev/web_acceptance.py`，**32 项约 15–40 s**，含与 CLI 的数值一致（案例表/阶段/SSIM）、缩略图是真 PNG、模块依赖图闭合、缺失静态文件是真 404、`/img` 缩放、`/file` 越权拒绝、未知步骤/案例拒绝、作业生命周期、6 案例 × 5 端点渲染、结果页布局守卫。
+  - 验收：`scripts/dev/web_acceptance.py`，**63 项约 50 s**，含与 CLI 的数值一致（案例表/阶段/SSIM）、缩略图是真 PNG、模块依赖图闭合、缺失静态文件是真 404、`/img` 缩放、`/file` 越权拒绝、未知步骤/案例拒绝、作业生命周期、6 案例 × 5 端点渲染、结果页布局守卫；
+    导出面加的是 GLB 结构（magic/chunk 长度/bufferView 边界/索引宽度/顶点数对得上 scene.json）、OBJ 顶点与面数、`Content-Disposition`、贴图是 PNG、zip 里 `scene.json` 与包内一致、导出作业起停与下载、坏 id 拒绝。
 - **工作台（CLI/MCP 层，上一轮完成，仍在跑）**：
   - `renderforge/caseinfo.py` + `status [case] [--json]`：来源与 8 个阶段全按磁盘产物推断；单案例给数字与一条可执行 next；核对引擎工程（记录过导入但 map 不在了 → stale）。6 个案例目录都跑过。
   - `renderforge/pipeline.py` + `run <case> [--from S] [--to S] [--force]`：步骤顺序随来源；产物存在即跳过；缺输入带原因跳过；失败停止并打印续跑命令；build 选项（extra_export/extra_pass）持久化。
@@ -111,7 +113,8 @@
 3. **逐物体差异指标**：现在只有整帧数字，回答不了"哪栋楼不对"。按源资产名（`scene.json -> instances[].source.object`）对指标分组即可；`wuwa_bridge` 已有 18,579/19,192 个带名实例。
 4. **材质常量（真正的 PBR 路径）**：解码逐材质常量块（`ps3`）并映射到引擎参数；取代 ORM 那条路，是一个项目而不是一个任务。证据见 `docs/MATERIAL_SEMANTICS.md`。
 5. **收尾 MCP 会话级验收**：开一个全新 Claude 会话，只用 `renderforge` MCP 工具走 `doctor → plan → status → step(build) → metrics`；协议级已经过了，这一步验的是 Agent 在真实会话里会不会正确选工具。
-5b. **Web 工作台的可选增强**（用户已在用，按反馈增补）：截图"原始尺寸"链接（现在只给 ≤1600 px 副本）；资源点选后触发"只导入这个网格"（`import_scene.py` 已支持 `RF_ONLY_KIND` / `RF_HIDE_MESH`，但 Web 侧还没接）；页面内嵌 Agent 对话。
+5b. **Web 工作台的可选增强**（用户已在用，按反馈增补）：截图"原始尺寸"链接（现在只给 ≤1600 px 副本）；资源点选后触发"只导入这个网格"
+   （`POST /api/case/<n>/run` 已能带 `only_kind`/`only_mesh`/`hide_mesh` 并转成 `RF_ONLY_KIND`/`RF_ONLY_MESH`/`RF_HIDE_MESH` 传给作业，但**页面还没有按钮**，也没有端到端跑过）；页面内嵌 Agent 对话。
 6. （参考）长期项：ZZZ 头/脸（GPU 驱动间接绘制）、蒙皮网格、D3D12/Vulkan、Nsight/PIX、编辑器控制（L6）。
 
 **不要做的事**：（旧约定“不要把工作台做成 Web UI”已作废：用户明确要求本地可视化工作台，见 `renderforge/web/`；要求是**不复刻** Agent 已有的能力、不引入前端框架与构建步骤。）不要在没有实际跑过的情况下把新命令标成 OK；`docs/TOOLBOX.md` 只能由 `python -m renderforge docs` 生成；`case.json` 里的 `steps` 由步骤图写，不要手改成“ok”来绕过一次失败；不要手调灯光强度和曝光。
@@ -122,10 +125,21 @@
 
 - `server.py`：所有响应都由 `workspace/` 经 `caseinfo.scan` / `pipeline.plan_steps` / `jobs.*` / `metrics` 派生，**不保存自己的状态**；页面与 CLI 不一致就是这里的 bug。
 - 端点：`/api/cases`、`/api/case/<n>[/steps|/assets|/report|/metrics|/jobs]`、`/api/jobs[/<id>[/log]]`、`/api/thumb/mesh`、`/img`、`/file`、`POST /api/case/<n>/{run,metrics}`。
+- 任务管理端点（`casectl.py`）：`GET /api/capture?path=`（读 4 字节 `RDOC` 魔数确认 + 从文件名解析帧号/时间/API + 建议目录 id）、
+  `POST /api/cases`（新建：目录 id、rdc 路径、显示名；只写 `case.json`，不复制 .rdc）、`POST /api/case/<n>/title`（只改显示名）。
+  `/api/cases` 的每行带 `title`（`case.json -> title`，回退到目录名）。`casectl.delete()` 存在但**页面没有接删除**。
+- 定位端点（`locate.py`）：`/api/pick?case=&x=&y=`（归一化坐标，返回按深度排序的命中，含 `near_camera`）、
+  `/api/related?case=&mesh=`（材质、贴图、同材质/同贴图的网格）。`/assets` 的每条网格额外带 `named/code/level/kind/material/screen/in_frame`，
+  顶层带 `camera {ok, why, vp_match}` 与 `facets`（分组用的计数）。左侧分组依据可在页面上切换（源名/类别码/关卡/渲染方式/未知/占比）。
+- 导出端点（`exporters.py` + `export_job.py`）：`/api/export/mesh?case=&mesh=&fmt=obj|glb`、`/api/export/texture?case=&tex=`、
+  `/api/export/case?case=&fmt=&meshes=&textures=`（同步，小案例）、`POST /api/case/<n>/export` → 子进程 → `workspace/_exports/<id>.zip`、
+  `/api/export/<id>`（状态）、`/api/export/jobs`（列表）、`/export/download?id=`。导出记录和 zip 都在 `workspace/_exports/`（git 忽略）；没有清理策略，攒多了手动删。
+  约定：GLB 是单网格文件（position/normal/UV，>65535 顶点用 uint32 索引），UV 保持左上原点；OBJ 翻 V，附 `materials.mtl` + 引用的贴图；
+  整案例 zip 另含 `scene.json` 原样、`INSTANCES.csv`、`CAMERA.json`、`REPORT.md`、`README.txt`。
 - 安全边界：只允许 `RUNNABLE` 里列出的步骤；`/file` 与 `/img` 拒绝 `workspace/` 之外的路径；未知案例 404。
 - 缩略图：读 `pos.f32`/`idx.u32` 做正交投影 + 平面着色（`abs(dot(N,L))`，因为捕获几何没有可信绕序），采样上限 1200 三角形，按 (case, mesh, size) 缓存。实测 40k 顶点网格 0.19 s。
 - 踩过的坑：`aspect-ratio` 的缩略图放在 grid `auto` 行里高度会塌成 2 px，改用 `grid-auto-rows`；3840×2160 的参考帧直接给 `<img>` 会让离屏窗口不绘制，改走 `/img` 缩放到 1600 px。
-- 验收：`scripts/dev/web_acceptance.py`，**32 项**（约 15 s，冷启动首次 40 s），含与 CLI 的数值一致性、越权拒绝、作业生命周期、6×5 端点渲染、结果页布局守卫。
+- 验收：`scripts/dev/web_acceptance.py`，**63 项**（约 50 s，冷启动首次更久），含与 CLI 的数值一致性、越权拒绝、作业生命周期、6×5 端点渲染、结果页布局守卫、导出（GLB 结构/OBJ 面数/zip/作业/坏 id）。
 - 本轮后续修复（用户反馈驱动，均已实测）：
   - **结果页三张图被裁剪**：`.shots` 是 flex 纵向容器，子项默认 `flex-shrink:1`，三张高图被压扁后由 `.shot` 的 `overflow:hidden` 裁掉上下。改为 `flex: 0 0 auto`，容器滚动。验收加了布局守卫。
   - **不能放大**：新增 `#lightbox` 对话框，点任意截图（含参考帧）按屏适配打开，再点切 1:1，`+`/`-` 切换，Esc 关闭，标题栏显示实际显示尺寸。
@@ -151,7 +165,7 @@ MCP：`.mcp.json` 里的 `renderforge`；不知道下一步就先 `status`，长
 可视化工作台：
 ```
 .venv\Scripts\python.exe -m renderforge web        # http://127.0.0.1:8770/ ，Ctrl-C 停
-.venv\Scripts\python.exe scripts/dev/web_acceptance.py   # 32 项，自起一个服务器，不占 8770
+.venv\Scripts\python.exe scripts/dev/web_acceptance.py   # 63 项，自起一个服务器，不占 8770
 ```
 `.claude/launch.json` 已配好（`renderforge-workbench`，固定 8770）；端口被占时预览工具会换端口，此时页面与 `launch.json` 不一致——先确认 `netstat -ano | grep 8770` 再看。
 

@@ -831,6 +831,25 @@
     "scripted stdio client: doctor/plan/games/status/metrics/step/job_start/job_status/job_log all returned JSON; job_start ran a full case in the background (39 s, exit 0)"
    ],
    "notes": "Standard library only; tools are thin wrappers over the CLI so output is identical. job_start writes workspace/_jobs/<id>.log plus an exit marker, so a later session can still read the outcome. Not yet exercised from a fresh Claude session through the harness."
+  },
+  {
+   "id": "rf-web-export",
+   "name": "RenderForge workbench asset export (OBJ / GLB / texture / case zip)",
+   "layer": "orchestrate",
+   "kind": "renderforge-core",
+   "interfaces": [
+    "GET /api/export/mesh?case=&mesh=&fmt=obj|glb",
+    "GET /api/export/texture?case=&tex=",
+    "GET /api/export/case?case=&fmt=&meshes=&textures=",
+    "POST /api/case/<name>/export -> workspace/_exports/<id>.zip"
+   ],
+   "status": "verified-here",
+   "integration": "direct",
+   "evidence": [
+    "scripts/dev/web_acceptance.py export-glb-well-formed / export-obj-faces / export-case-zip / export-job-* (42/42)",
+    "workspace/_exports/*.zip: 535-mesh case subsets written by export_job and re-opened with zipfile"
+   ],
+   "notes": "Derived from build/scene.json alone: no re-solving, no invented geometry. GLB is a single mesh per file with positional/normal/UV accessors (uint32 indices above 65535 vertices) and keeps the package top-left UV origin; OBJ flips V because OBJ is bottom-left. Whole-case zips ship scene.json verbatim, INSTANCES.csv, CAMERA.json, REPORT.md and the textures the exported meshes reference. Large cases run as a child process (renderforge.web.export_job) so the HTTP threads stay free. Materials are preview level, not the game shaders."
   }
  ]
 }

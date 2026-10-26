@@ -18,7 +18,7 @@ L6 编辑器控制   ████░░░░░░ 40%  UE 官方 MCP ✅(读�
 L7 验证         ████████░░ 80%  离屏截图+并排对比 ✅ · 数值指标(SSIM/MAE/覆盖率/IoU) ✅ · 离线回归夹具 ✅ · MCP 协议级验收 ✅ · 逐材质/逐物体差异 ⬜
 L8 编排         █████████░ 90%  registry/games/recipes/doctor/plan/docs ✅ · 案例状态+可续跑步骤图 ✅ · MCP server ✅ · skill ✅(会话级验收未独立跑) · 后台作业 ✅ · 日志统一 ✅ · **本地 Web 工作台 ✅**(四页面 + 3D 资源预览)
 
-L9 可视化        ███████░░░ 70%  任务总览✅ · 工作流可视化✅ · 资源浏览器✅(缩略图+悬停3D+查看器) · 场景结果✅(不裁剪+放大) · Agent 对话未内嵌 ⬜ · 编辑器控制入口 ⬜
+L9 可视化        ████████░░ 80%  任务总览✅ · 工作流可视化✅ · 资源浏览器✅(缩略图+悬停3D+查看器) · 场景结果✅(不裁剪+放大) · **资源导出 ✅**(OBJ/GLB/贴图/整案例 zip) · Agent 对话未内嵌 ⬜ · 编辑器控制入口 ⬜
 ```
 
 ## 游戏 × 阶段 覆盖矩阵
@@ -95,8 +95,31 @@ L9 可视化        ███████░░░ 70%  任务总览✅ · 工�
 - ✅ 页面：**任务总览**（阶段徽章、draw/网格/实例、VP 拟合、身份覆盖、该案例参考帧缩略图、5 s 轮询）、**工作流**（按来源的步骤图、每步真实结果、单步重跑/整条运行）、**资源浏览器**（模型按源资产名分组、服务端渲染缩略图、纹理/材质、搜索）、**场景结果**（参考帧 + 各引擎截图、导入报告、SSIM/MAE/RMSE/p95/覆盖率/IoU、构建统计）。
 - ✅ **3D 资源预览**：悬停缓慢旋转，点击打开轨道查看器。**全页单一 WebGL 上下文**（浏览器上限约 16，每卡一个会坏），按需借用/归还；几何走 `/api/meshbin` 直发 `pos.f32`+`idx.u32`（4 字节对齐），不转 glTF。three.js r186 内置（MIT），离线可用。
 - ✅ 服务端不持有状态：一切由 `workspace/` 经 `caseinfo`/`pipeline`/`jobs`/`metrics` 派生，页面与 CLI 不一致即为 bug。
-- ✅ 验收 `scripts/dev/web_acceptance.py` **32 项**（约 15 s）：与 CLI 数值一致、模块依赖图闭合、缺失静态文件真 404、`/img` 缩放、越权拒绝、未知步骤/案例拒绝、作业生命周期、6×5 端点渲染、结果页布局守卫。
+- ✅ **资源导出**（`renderforge/web/exporters.py` + `export_job.py`）：单网格 OBJ / GLB、贴图原图 PNG、整案例 zip。
+  整案例 zip 含 `scene.json`（原样）、`meshes/`、`materials.mtl`（OBJ）、`textures/`、`INSTANCES.csv`（逐实例世界矩阵）、`CAMERA.json`、`REPORT.md`。
+  卡片上有 OBJ/GLB 下载，查看器里也有；资源浏览器顶部按当前筛选/分组导出（`OBJ · N` / `GLB · N`），大案例走后台作业（`workspace/_exports/<id>.zip`）。
+  约定：GLB 保持包的左上原点 UV（glTF 一致），OBJ 翻 V（OBJ 是左下原点）；GLB 索引在 >65535 顶点时用 uint32。
+  子集导出只打包这些网格材质引用的贴图；整案例导出打包场景列出的全部贴图（WuWa 一帧约 600 MB，所以不是默认）。
+- ✅ **任务管理**：任务总览左侧可**新建任务**（填本机 .rdc 路径 → 读 `RDOC` 魔数确认 → 填目录 id 与显示名 → 建目录 →
+  自动启动 `survey` 后台作业）与**重命名**（只改 `case.json -> title`，目录 id 不变，因为引擎资产路径与截图文件名由它派生）。
+  左侧还有任务过滤框。目录 id 校验 `[A-Za-z0-9._-]`、拒绝保留名/已存在/路径穿越。
+  ⚠ 没有做**大文件上传**：1–2 GB 的 .rdc 只能填本机已有路径；也没有做删除任务（有 `casectl.delete`，页面未接）。
+  ⚠ 新建后自动跑的是 survey（列 draw、找 pass），会真的启动 qrenderdoc 分析整个截帧，大文件上要几分钟。
+- ✅ **按画面定位资产 + 多维分类**（`renderforge/web/locate.py`）：在参考帧上点击 → 射线逐三角形求交 → 按深度列出命中，
+  选中后显示材质/贴图/同材质同贴图的网格，并把列表收窄到命中项。分类从“只有源资产名”扩到 6 个分组维度
+  （源名 / 类别码 / 关卡目录 / 渲染方式 / 未知分组 / 屏幕占比）+ 叠加筛选（画面内、画面占比、已识别/未知）。
+  实测：`wuwa_bridge` 535 网格中 248 有源名、495 在画面上；“Bri · 桥”筛出 4 个网格；未知 287 个按共用贴图分出 27/19/15…；
+  “画面 >5% + 未知”叠出 67 个，导出按钮同步为 `OBJ · 67`。拾取 8–20 ms，点桥拱得 `SM_Old_Bri_01AH`。
+  ⚠ 覆盖是**投影包围盒**，不是光栅化轮廓；相机是拟合的（`vp_match`），画面边缘可能差几个像素；
+  没有可用相机的案例（`unity_synth`、`zzz_frame01` 的自动环绕机位）会明确拒绝定位并给出原因。
+- ✅ **加载性能**（都是量过的）：`caseinfo._json` 按 (路径, 大小, mtime_ns) 缓存解析（20 MB scene.json 0.15 s → 命中 ~0）；
+  缩略图落盘缓存（`workspace/_logs/webcache/thumbs`，按网格文件的 size+mtime 命名）；HTTP/1.1 keep-alive + 关 Nagle；
+  API JSON 紧凑序列化 + gzip（资源列表 352 KB → 28 KB）；静态文件 ETag/304（three.js 2.1 MB 不再每次重下）、缩略图 `max-age`；
+  导出压缩走 `compresslevel=6`。实测：`/api/case/<n>` 0.36–0.82 s → 10 ms；`scan_all` 0.65 s → 3.8 ms（热）；
+  30 张冷缩略图 1.4 s → 93 ms，热 14 ms；三个 JSON 大文件常驻内存约 170 MB（按字节预算的 LRU）。
+- ✅ 验收 `scripts/dev/web_acceptance.py` **63 项**（约 50 s）：原有 32 项，加 GLB 结构/OBJ 面数/Content-Disposition/贴图 PNG/zip 内 scene.json 原样/导出作业起停与下载/坏 id 拒绝，定位（6 点散测命中、深度单调、命中网格存在、关联有材质、坏坐标 400、无相机案例明确拒绝）、分类（已识别计数、画面内子集、类别码可解析、kind 词表），以及任务管理（截帧检查、拒绝非 rdc、新建、列名、重命名、目录不变、重复与路径穿越拒绝）。
 - ⚠ 边界：页面截图是 ≤1600 px 副本（非截帧原始分辨率）；资源按选触发导入未接（`RF_ONLY_KIND`/`RF_HIDE_MESH` 已在导入器里）；**Agent 对话未内嵌**；编辑器控制（L6）无入口；植被散片类网格 3D 预览仍像"一堆草叶"（数据特性）。
+  导出只给"所见数据"：网格是未放置的原始网格（世界变换在 `INSTANCES.csv`），材质是预览级，导出里的贴图引用按贴图文件名而不是材质槽语义。
 
 **阶段 C（扩展）**
 - D3D12 / Vulkan 截帧验证；Nsight / PIX 作为 RenderDoc 抓不到时的后备评估
@@ -120,7 +143,8 @@ L9 可视化        ███████░░░ 70%  任务总览✅ · 工�
 - `selftest` 只覆盖本仓库已提交的夹具（unity_synth、wuwa_bridge、zzz_frame01 等）；夹具缺失时该项记为 skipped 而非失败，所以“6 passed”不代表覆盖任意新案例。
   其中 `toolbox-data` 检查 `docs/TOOLBOX.md` 是否比 toolbox 数据新；手改 TOOLBOX.md 或只改数据不重跑 `docs` 都会让它失败。
 - 工作台（status/run/metrics/selftest/MCP）已在 6 个真实案例目录上运行。MCP 面已做**协议级**验收（`scripts/dev/mcp_acceptance.py` 16/16，约 38 s，原始 JSON-RPC over stdio，并含 CLI 一致性）；**“全新会话只用 MCP 工具走通”仍未做**。
-- **Web 工作台**已在真实案例上运行并截屏验证：四页面均读真实数据，3D 预览与查看器、结果页放大与不裁剪均实际点开过。但它只做"看 + 跑流水线"，**不做编辑**；页内没有 Agent 对话；没有权限/多用户概念（绑定 `127.0.0.1`，仅供本机）。
+- **Web 工作台**已在真实案例上运行并截屏验证：四页面均读真实数据，3D 预览与查看器、结果页放大与不裁剪均实际点开过。它能"看 + 跑流水线 + 导出资源"，但**不做编辑**；页内没有 Agent 对话；没有权限/多用户概念（绑定 `127.0.0.1`，仅供本机）。
+  导出是派生不是求解：GLB/OBJ 里是捕获到的原始网格，不是源资产原文件；OBJ 的 MTL 只连底色/法线两张图，槽位语义没有从着色器翻译。
   两者不等价：协议测试证明工具能调通、与 CLI 一致，不证明一个 Agent 在真实会话里会正确选择它们。
 - 工作区已清理（4.0 GB → 3.1 GB）：删掉了五个临时探针目录（`_probe_light`、`_probe_lighting`、`_probe_particles`、`_probe_water`、`_zzz_probe`）、被取代的导出（`wuwa_bridge/export_transparent{,_2,_3}`、`export_depth`）、旧构建（`wuwa_f3422/build2`、`build3`）、`-backup-*` 日志与日志归档。
   保留：每个案例的 `export`/`build`/`shots`/`survey`/`ids`/`unity_pkg`/`_scene_*_space`，以及 `_logs`（每个流水线族最新一次）和 `_jobs`。**注意**：`renderforge/adapters/zzz.py` 的 docstring 仍指向 `workspace/zzz_probe/scripts/`，那个目录已被清理——要复现 ZZZ 探针需重写脚本（适配器本身的结论在 docstring 里数值完整）。

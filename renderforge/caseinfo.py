@@ -20,6 +20,8 @@ Stage vocabulary (fixed, used by status / run / MCP):
 with a `.rdc` is a RenderDoc capture.
 """
 import json
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,11 +33,47 @@ STAGES = ["survey", "export", "build", "identify", "emit-ue", "emit-unity", "sho
 SOURCE_INDEX_GAMES = {"wuwa"}
 
 
-def _json(p, default=None):
+def _json(p, default=None, fresh=False):
+    """Parse a JSON file, reusing a cached parse when the file has not changed.
+
+    Why: a scene.json from a real capture is 20-30 MB and takes ~0.15 s to parse, and one workbench page scans the
+    same case twice (detail + step plan). The cache is keyed on (path, size, mtime_ns), so a step that rewrites a
+    file is seen on the next read; readers share the object, and writers already parse their own copy.
+
+    `fresh=True` opts out: use it for any file the caller may mutate in place (case.json is mutated by virtually
+    every step) or that a step is about to delete and recreate with identical bytes (convert_scene).
+    """
+    p = Path(p)
+    if not fresh:
+        try:
+            st = p.stat()
+        except OSError:
+            return default
+        key = (str(p), st.st_size, st.st_mtime_ns)
+        with _JSON_LOCK:
+            hit = _JSON_CACHE.get(key)
+            if hit is not None:
+                _JSON_CACHE.move_to_end(key)     # LRU: the case being looked at stays resident
+                return hit[0]
     try:
-        return json.loads(Path(p).read_text(encoding="utf-8"))
+        val = json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default
+    if not fresh:
+        with _JSON_LOCK:
+            # budget by bytes, not entries: six cases read ~7 files each, and the three capture-sized scene.json
+            # files alone are ~20 MB of text (roughly twice that once parsed)
+            _JSON_CACHE[key] = (val, st.st_size * _JSON_PARSE_OVERHEAD)
+            _JSON_CACHE.move_to_end(key)
+            while sum(e[1] for e in _JSON_CACHE.values()) > _JSON_CACHE_BYTES and len(_JSON_CACHE) > 1:
+                _JSON_CACHE.popitem(last=False)   # a rewrite changes the key; the old entry is unreachable
+    return val
+
+
+_JSON_CACHE = OrderedDict()          # (path, size, mtime_ns) -> (parsed, estimated bytes in memory)
+_JSON_CACHE_BYTES = 600_000_000      # ~300 MB of real objects; a local single-user workbench can afford it
+_JSON_PARSE_OVERHEAD = 2.0           # a parsed dict/list tree costs about twice the JSON text that produced it
+_JSON_LOCK = threading.Lock()
 
 
 def _extract_meta(d):
@@ -79,7 +117,7 @@ def _game_from_input(inp):
 def scan(name, case_root=None):
     """One case -> dict (JSON-serialisable): source, stages present, key numbers, inferred next step."""
     d = Path(case_root) if case_root else WS / name
-    case = _json(d / "case.json") or {}
+    case = _json(d / "case.json") or {}      # read-only here; pipeline.load_case is the fresh (mutating) reader
     stages = {s: False for s in STAGES}
     detail = {}
 
@@ -168,6 +206,8 @@ def scan(name, case_root=None):
 
     return {
         "case": name, "path": str(d), "has_case_json": (d / "case.json").exists(),
+        # `title` is what to show a person; `case` stays the directory id because engine asset paths derive from it
+        "title": case.get("title") or name,
         "source": source, "game": game, "target": target, "input": inp,
         "input_exists": Path(inp).exists() if inp else None,
         "stages": stages, "detail": detail,
@@ -289,7 +329,7 @@ def summary(cases):
     for c in cases:
         st = c["stages"]
         done = [s for s in STAGES if st[s]]
-        rows.append({"case": c["case"], "source": c["source"], "game": c["game"],
+        rows.append({"case": c["case"], "title": c.get("title") or c["case"], "source": c["source"], "game": c["game"],
                      "stages": done, "next": (c["next"] or {}).get("step"),
                      "draws": (c["detail"].get("export") or {}).get("draws"),
                      "meshes": (c["detail"].get("build") or {}).get("meshes"),

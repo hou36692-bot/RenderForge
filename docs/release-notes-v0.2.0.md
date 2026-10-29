@@ -37,7 +37,7 @@
 - `launch`：用 RenderDoc `ExecuteAndInject` 启动程序；每次请求必须显式 `--allow-launch` / `allow_launch=true`，权限不写入档案
 - `trigger`：对已注入目标抓一帧，校验 `RDOC` 头，原始 `.rdc` 只读、不复制
 
-这条路线**故意不进入 `run`**，不会在普通流水线里启动游戏；没有全局/子进程钩子，没有保护绕过。Endfield 档案已接上，但**本机还没有成功捕获的终末地 `.rdc`**，因此只能算候选路线，不是已兼容声明。调研与边界见 [ENDFIELD_RESEARCH.md](ENDFIELD_RESEARCH.md)。
+这条路线**故意不进入 `run`**，不会在普通流水线里启动游戏；没有全局/子进程钩子，没有保护绕过。Endfield 档案已接上，但**本机还没有成功捕获的终末地 `.rdc`**，因此只能算候选路线，不是已兼容声明。调研与边界见 [ENDFIELD_RESEARCH.md](https://github.com/hou36692-bot/RenderForge/blob/main/docs/ENDFIELD_RESEARCH.md)。
 
 ## 这个版本修复什么
 

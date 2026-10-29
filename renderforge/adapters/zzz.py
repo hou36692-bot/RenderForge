@@ -58,6 +58,12 @@ differently (107: 360 px, 124: 256 px) because their POSITION0 is bind pose. `ap
 matrices and camera in true world space; `to_reference()` adds the term for consumers that want to
 compare against the dumped preview directly.
 
+Two cameras, one pose: the character preview uses cb0[95..98] (2880x1368, vfov 24) and the composite frame
+uses cb3[5..8] (3840x2160, vfov 60) with the same cb0 view. `solve_placement()` exposes the preview camera
+(`camera`/`vp`) and the world camera (`frame_camera`/`frame_vp`); `scene_camera`/`scene_vp` pick the world
+one, because a reconstructed scene contains world geometry. The preview camera stays for comparisons against
+the character render target.
+
 Preview -> final frame: the 2880x1368 preview is composited into the 3840x2160 frame. Measured by
 matching its character pixels against `reference_backbuffer.png` (byte-identical to the dumped 3840x2160
 `o0=91005981` target, mean abs diff 0.00): scale 1.5789, offset (-200, 0), residual 31/255 over 16110
@@ -74,6 +80,9 @@ import numpy as np
 VIEW_ROWS = 119            # vs-cb0: world -> view
 CAMERA_ROWS = 123          # vs-cb0: view -> world (camera-to-world); row 3 is the eye
 PROJ_PREVIEW_ROWS = 95     # vs-cb0: projection of the 2880x1368 preview
+FRAME_PROJ_SLOT = 3        # vs-cb3: projection of the 3840x2160 composite frame
+FRAME_PROJ_ROWS = 5        # vs-cb3 rows 5..8
+FRAME_BLOCK_FLOATS = 92    # cb3 is this long on the 3D draws; other draws bind shorter/unrelated blocks
 WORLD_ROWS = 0             # vs-cb1: world matrix
 EYE_ROW = 126              # vs-cb0: eye position literal, cross-check for CAMERA_ROWS
 UI_OFFSET_ROW = 21         # vs-cb0: screen-space x framing term, value is UI_OFFSET_X
@@ -156,6 +165,30 @@ def solve_camera(cb_by_draw):
             "eye_literal_error": float(np.abs(pos - literal).max())}
 
 
+def solve_frame_camera(cb_by_draw):
+    """(camera, P) for the 3840x2160 composite frame, or (None, None) when no draw carries cb3.
+
+    The preview and frame cameras share a pose but not a projection: the character is rendered with the
+    24-degree preview projection, while the world behind it uses this 60-degree 16:9 one. A reconstructed
+    scene wants the world camera; the preview camera stays available for comparisons against the character
+    render target. Pose comes from the same cb0 camera block, so the two cameras cannot drift apart.
+    """
+    for eid in sorted(cb_by_draw):
+        cb = cb_by_draw[eid]
+        if FRAME_PROJ_SLOT not in cb or len(cb[FRAME_PROJ_SLOT]) < FRAME_BLOCK_FLOATS:
+            continue
+        P = _win(cb[FRAME_PROJ_SLOT], FRAME_PROJ_ROWS)
+        cam = dict(solve_camera(cb_by_draw))
+        cam.update({
+            "hfov_deg": float(np.degrees(2 * np.arctan(1.0 / abs(P[0, 0])))),
+            "vfov_deg": float(np.degrees(2 * np.arctan(1.0 / abs(P[1, 1])))),
+            "aspect": float(FRAME_W / FRAME_H),
+            "projection": "frame",
+        })
+        return cam, P
+    return None, None
+
+
 def solve_world(cb, C=None):
     """Per-draw world matrix from vs-cb1 rows 0..3 (row-vector: p_world = [p, 1] @ W).
 
@@ -187,27 +220,23 @@ def to_reference(V, P, ui_offset=UI_OFFSET_X):
     return V @ P @ S
 
 
-def apply(frame_dir, extract_json_path, out_json_path, world_space=True):
-    """Annotate an extract with per-draw world matrices, the camera, and the view-projection.
+def solve_placement(frame_dir, extract_data):
+    """Per-draw world matrices and the capture camera for an extract, without writing anything.
 
-    Writes a copy of `extract_json_path` to `out_json_path`. Every draw gains
-        "world":    16 floats, row-vector (p_world = [p, 1] @ W), or null when it has no rigid world
-        "world_ok": whether that check passed
-    and the package gains "camera", "view", "projection", "vp", "adapter".
+    This is the interface the build path consumes: `build_model_space(..., placement=...)` reads
+    `world` (eid -> 16 floats, row-vector) and `camera`. Draws that fail the rigidity check are
+    screen-space UI passes (they bind a 36-float vs-cb1), not 3D objects; they are absent from `world`
+    and listed in `fail_reasons` rather than given a fabricated matrix.
 
-    Draws that fail the rigidity check are screen-space UI passes (they bind a 36-float vs-cb1), not 3D
-    objects; they are reported and left without a world matrix rather than given a fabricated one.
-
-    Returns a summary dict; raises if no draw at all yields a world matrix.
+    Raises if no draw at all yields a world matrix.
     """
-    frame_dir, src, dst = Path(frame_dir), Path(extract_json_path), Path(out_json_path)
-    data = json.loads(src.read_text(encoding="utf-8"))
-    draws = data["draws"]
+    draws = extract_data["draws"]
     eids = sorted({int(d["eid"]) for d in draws})
-
     cbs = {eid: read_cbuffers(frame_dir, eid) for eid in eids}
     V, P = solve_view_proj(cbs)
     cam = solve_camera(cbs)
+    frame_cam, frame_P = solve_frame_camera(cbs)
+    frame_vp = (V @ frame_P) if frame_P is not None else None
 
     worlds, fail = {}, []
     for eid in eids:
@@ -222,28 +251,76 @@ def apply(frame_dir, extract_json_path, out_json_path, world_space=True):
     if not worlds:
         raise RuntimeError("no draw yielded a world matrix; vs-cb1 does not hold one in this capture")
 
-    for d in draws:
-        W = worlds.get(int(d["eid"]))
-        d["world"] = None if W is None else [float(x) for x in W.reshape(-1)]
-        d["world_ok"] = W is not None
-
-    data["camera"] = cam
-    data["view"] = [float(x) for x in V.reshape(-1)]
-    data["projection"] = [float(x) for x in P.reshape(-1)]
-    data["vp"] = [float(x) for x in (V @ P if world_space else to_reference(V, P)).reshape(-1)]
-    data["adapter"] = {
-        "game": "zzz", "source": "3dmigoto", "convention": "row-vector (p_world = [p,1] @ W)",
+    camera_eid = _camera_draw(cbs)
+    return {
+        "name": "zzz", "source": "3dmigoto", "space": "unity",
+        "world": {int(eid): [float(x) for x in W.reshape(-1)] for eid, W in worlds.items()},
+        "world_ok": len(worlds), "draws": len(draws), "world_fail": len(fail), "fail_reasons": fail[:5],
+        "camera": cam,
+        "view": [float(x) for x in V.reshape(-1)],
+        "projection": [float(x) for x in P.reshape(-1)],
+        "vp": [float(x) for x in (V @ P).reshape(-1)],
+        # the world camera of the composited frame; the preview camera stays available for RT comparisons
+        "frame_camera": frame_cam,
+        "frame_projection": [float(x) for x in frame_P.reshape(-1)] if frame_P is not None else None,
+        "frame_vp": [float(x) for x in frame_vp.reshape(-1)] if frame_vp is not None else None,
+        "scene_camera": frame_cam or cam,
+        "scene_vp": [float(x) for x in (frame_vp if frame_vp is not None else V @ P).reshape(-1)],
+        "scene_size": [FRAME_W, FRAME_H] if frame_cam else [PREVIEW_W, PREVIEW_H],
         "view_rows": VIEW_ROWS, "camera_rows": CAMERA_ROWS, "projection_rows": PROJ_PREVIEW_ROWS,
+        "frame_projection_slot": FRAME_PROJ_SLOT, "frame_projection_rows": FRAME_PROJ_ROWS,
         "world_rows": WORLD_ROWS, "preview_size": [PREVIEW_W, PREVIEW_H],
         "frame_size": [FRAME_W, FRAME_H], "preview_to_frame": PREVIEW_TO_FRAME,
-        "ui_offset_ndc_x": float(np.asarray(cbs[eid0 := _camera_draw(cbs)][0])[UI_OFFSET_ROW * 4]),
+        "ui_offset_ndc_x": float(np.asarray(cbs[camera_eid][0])[UI_OFFSET_ROW * 4]),
         "model_basis": None,
+    }
+
+
+def apply(frame_dir, extract_json_path, out_json_path, world_space=True, placement=None):
+    """Annotate an extract with per-draw world matrices, the camera, and the view-projection.
+
+    Writes a copy of `extract_json_path` to `out_json_path`. Every draw gains
+        "world":    16 floats, row-vector (p_world = [p, 1] @ W), or null when it has no rigid world
+        "world_ok": whether that check passed
+    and the package gains "camera", "view", "projection", "vp", "adapter".
+
+    `placement` lets a caller that already ran `solve_placement()` skip the cbuffer pass (the build path
+    does, so a build does not decode the same dumps twice). Returns a summary dict; raises if no draw at
+    all yields a world matrix. This function exists to keep a reviewable copy on disk.
+    """
+    frame_dir, src, dst = Path(frame_dir), Path(extract_json_path), Path(out_json_path)
+    data = json.loads(src.read_text(encoding="utf-8"))
+    pl = placement or solve_placement(frame_dir, data)
+    V = np.asarray(pl["view"], dtype=np.float64).reshape(4, 4)
+    P = np.asarray(pl["projection"], dtype=np.float64).reshape(4, 4)
+
+    for d in data["draws"]:
+        W = pl["world"].get(int(d["eid"]))
+        d["world"] = W
+        d["world_ok"] = W is not None
+
+    data["camera"] = pl["camera"]
+    data["view"] = pl["view"]
+    data["projection"] = pl["projection"]
+    data["vp"] = [float(x) for x in (V @ P if world_space else to_reference(V, P)).reshape(-1)]
+    data["frame_camera"] = pl["frame_camera"]
+    data["frame_projection"] = pl["frame_projection"]
+    data["frame_vp"] = pl["frame_vp"]
+    data["adapter"] = {
+        "game": "zzz", "source": "3dmigoto", "convention": "row-vector (p_world = [p,1] @ W)",
+        "view_rows": pl["view_rows"], "camera_rows": pl["camera_rows"], "projection_rows": pl["projection_rows"],
+        "frame_projection_slot": pl["frame_projection_slot"], "frame_projection_rows": pl["frame_projection_rows"],
+        "world_rows": pl["world_rows"], "preview_size": pl["preview_size"],
+        "frame_size": pl["frame_size"], "preview_to_frame": pl["preview_to_frame"],
+        "scene_camera": "frame" if pl["frame_camera"] else "preview",
+        "ui_offset_ndc_x": pl["ui_offset_ndc_x"], "model_basis": None,
         "note": "the model_basis in toolbox/games.json must NOT be applied on top of these world "
                 "matrices; see renderforge/adapters/zzz.py",
     }
     dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(json.dumps(data, indent=1), encoding="utf-8")
 
-    return {"draws": len(draws), "world_ok": len(worlds), "world_fail": len(fail),
-            "fail_reasons": fail[:5], "camera": cam, "preview_to_frame": PREVIEW_TO_FRAME,
-            "out": str(dst)}
+    return {"draws": pl["draws"], "world_ok": pl["world_ok"], "world_fail": pl["world_fail"],
+            "fail_reasons": pl["fail_reasons"], "camera": pl["camera"],
+            "scene_camera": "frame" if pl["frame_camera"] else "preview",
+            "preview_to_frame": PREVIEW_TO_FRAME, "out": str(dst)}

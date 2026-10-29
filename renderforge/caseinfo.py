@@ -106,8 +106,12 @@ def _newest_mtime(p):
 def _game_from_input(inp):
     """Guess the game profile id from a capture path (profiles in toolbox/games.json carry match hints)."""
     low = (inp or "").lower()
-    hints = {"wuwa": ("wutheringwave", "wuthering waves", "mingchao"), "zzz": ("zenless", "zzz"),
-             "genshin": ("genshin", "yuanhen"), "hsr": ("starrail", "star rail"), "endfield": ("endfield",)}
+    # the last key of each row is the 3DMigoto/XXMI package name: dumps usually sit under ...\ZZMI\FrameAnalysis-...
+    hints = {"wuwa": ("wutheringwave", "wuthering waves", "mingchao", "wwmi"),
+             "zzz": ("zenless", "zzz", "zzmi"),
+             "genshin": ("genshin", "yuanhen", "gimi"),
+             "hsr": ("starrail", "star rail", "srmi"),
+             "endfield": ("endfield",)}
     for gid, keys in hints.items():
         if any(k in low for k in keys):
             return gid
@@ -211,13 +215,17 @@ def scan(name, case_root=None):
         "source": source, "game": game, "target": target, "input": inp,
         "input_exists": Path(inp).exists() if inp else None,
         "stages": stages, "detail": detail,
-        "next": _next_step(source, stages, game, target, stale),
+        "next": _next_step(source, stages, game, target, stale, inp),
         "notes": _notes(name, d, case, stages, detail, scene) + stale,
     }
 
 
-def _next_step(source, stages, game, target, stale=()):
-    """The single most useful next action, as {step, cmd, why}. Never claims an optional step is required."""
+def _next_step(source, stages, game, target, stale=(), inp=None):
+    """The single most useful next action, as {step, cmd, why}. Never claims an optional step is required.
+
+    Required progress is checked before optional steps: a case with no extract must be told to ingest, not told to
+    do the optional identity pass just because that check happened to come first.
+    """
     c = "{case}"
     if stale:
         # the recorded import no longer exists in the engine, or predates the scene: redo it before anything downstream
@@ -229,29 +237,26 @@ def _next_step(source, stages, game, target, stale=()):
             step = "emit-unity" if "Unity" in stale[0] else "emit-ue"
         flag = {"emit-ue": "ue-import", "emit-unity": "unity-import", "shot": "shot"}[step]
         return {"step": step, "cmd": f"python -m renderforge {flag} {c}", "why": stale[0]}
-    # every required stage is done: report the best optional step this case can still take, else nothing
-    if stages["export"] and not stages["identify"] and source in ("rdc", "3dmigoto") and game in SOURCE_INDEX_GAMES:
-        return {"step": "identify", "cmd": f"python -m renderforge identify {c} --index <SourceProbe dump-index dir> --apply",
-                "why": "optional: name meshes after the game's own assets (needs a source index for this game)"}
-    if stages["export"] and stages["shot"] and not stages["metrics"]:
-        return {"step": "metrics", "cmd": f"python -m renderforge metrics {c}",
-                "why": "optional: no metrics.json: the comparison is still only a side-by-side image"}
-    if target != "unity" and stages["emit-ue"] and not stages["emit-unity"]:
-        return {"step": "emit-unity", "cmd": f"python -m renderforge unity-import {c}",
-                "why": "optional: the same scene has not been emitted to Unity"}
-    return {"step": None, "cmd": None, "why": "every stage this case can run without new input data is done"}
-    if not stages["export"] and source == "rdc":
-        if not stages["survey"]:
-            return {"step": "survey", "cmd": f"python -m renderforge survey {c} --rdc <file.rdc>",
-                    "why": "no survey/survey.json: list the draws and find the scene pass"}
-        return {"step": "export", "cmd": f"python -m renderforge export {c}",
-                "why": "the case has no Extract Package (export/extract.json)"}
+
+    if not stages["export"]:
+        if source == "rdc":
+            if not stages["survey"]:
+                return {"step": "survey", "cmd": f"python -m renderforge survey {c} --rdc <file.rdc>",
+                        "why": "no survey/survey.json: list the draws and find the scene pass"}
+            return {"step": "export", "cmd": f"python -m renderforge export {c}",
+                    "why": "the case has no Extract Package (export/extract.json)"}
+        if source == "3dmigoto":
+            return {"step": "ingest-3dmigoto", "cmd": _ingest_cmd("ingest-3dmigoto", c, inp, "--frame-dir"),
+                    "why": "no Export Package: read the FrameAnalysis dump into model-space meshes"}
+        if source == "unity-bundle" and not stages["build"]:
+            return {"step": "ingest-unity", "cmd": _ingest_cmd("ingest-unity", c, inp, "--bundle"),
+                    "why": "no Scene Package: read the Unity bundle"}
     if not stages["build"]:
         if source == "3dmigoto":
             return {"step": "build-model", "cmd": f"python -m renderforge build-model {c} --game {game or '<game>'}",
                     "why": "no build/scene.json: place the model-space meshes"}
         if source == "unity-bundle":
-            return {"step": "ingest-unity", "cmd": f"python -m renderforge ingest-unity {c} --bundle <file>",
+            return {"step": "ingest-unity", "cmd": _ingest_cmd("ingest-unity", c, inp, "--bundle"),
                     "why": "no build/scene.json: read the Unity bundle into a Scene Package"}
         return {"step": "build", "cmd": f"python -m renderforge build {c}",
                 "why": "no build/scene.json: solve world matrices and the camera"}
@@ -266,7 +271,22 @@ def _next_step(source, stages, game, target, stale=()):
     if not stages["metrics"] and stages["export"] and stages["shot"]:
         return {"step": "metrics", "cmd": f"python -m renderforge metrics {c}",
                 "why": "no metrics.json: the comparison is still only a side-by-side image"}
+    # every required stage is done: report the best optional step this case can still take, else nothing
+    if stages["export"] and not stages["identify"] and source in ("rdc", "3dmigoto") and game in SOURCE_INDEX_GAMES:
+        return {"step": "identify", "cmd": f"python -m renderforge identify {c} --index <SourceProbe dump-index dir> --apply",
+                "why": "optional: name meshes after the game's own assets (needs a source index for this game)"}
+    if target != "unity" and stages["emit-ue"] and not stages["emit-unity"]:
+        return {"step": "emit-unity", "cmd": f"python -m renderforge unity-import {c}",
+                "why": "optional: the same scene has not been emitted to Unity"}
     return {"step": None, "cmd": None, "why": "every stage this case can run without new input data is done"}
+
+
+def _ingest_cmd(step, case, inp, flag):
+    """A runnable command with the recorded input path when there is one, else a placeholder."""
+    if inp:
+        return f'python -m renderforge {step} {case} {flag} "{inp}"'
+    placeholder = "<FrameAnalysis-...>" if flag == "--frame-dir" else "<bundle>"
+    return f"python -m renderforge {step} {case} {flag} {placeholder}"
 
 
 def artifact_state(name, stages, emit_ok, ue_dir=None, unity_dir=None):
@@ -295,7 +315,8 @@ def _notes(name, d, case, stages, detail, scene):
         skipped = (rp.get("skipped") or 0) + (rp.get("extra_skipped") or 0)
         if skipped:
             out.append(f"build skipped {skipped} draw(s) (billboards / unfittable / no post-VS data)")
-        if (scene.get("vp_match") or 0) < 0.8 and scene.get("vp"):
+        # an adapter scene does not fit a VP; its camera comes from the capture, so a 0.0 vp_match is expected
+        if (scene.get("vp_match") or 0) < 0.8 and scene.get("vp") and not scene.get("adapter"):
             out.append(f"VP fit is weak ({scene.get('vp_match'):.2f})")
         if rp.get("baked"):
             out.append(f"{rp['baked']} draw(s) baked from clip space (non-rigid); geometry is frozen at the captured pose")

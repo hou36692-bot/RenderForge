@@ -10,6 +10,7 @@ Runs its own server on a free port, so it is safe alongside a workbench you alre
 import json
 import os
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -356,26 +357,39 @@ def main():
                       f"{c['case']}: {pk2.get('why')}")
                 break
 
-        # 7d. task management: a capture can be inspected and a case created from it, and a display name can be set.
-        # Uses its own scratch case and removes it, so the real cases are untouched (this test must stay rerunnable).
+        # 7d. task management: an input can be inspected and a case created from it, and a display name can be set.
+        # Covers all three sources the pipeline ingests; each probe directory is removed again, so the real cases
+        # are untouched (this test must stay rerunnable).
         probe = "rf-acceptance-probe"
-        real_rdc = None
-        for c in cases:
-            cj = ROOT / "workspace" / c["case"] / "case.json"
+
+        def case_input(case, key):
             try:
-                rec = json.loads(cj.read_text(encoding="utf-8"))
+                return json.loads((ROOT / "workspace" / case / "case.json").read_text(encoding="utf-8")).get(key)
             except (OSError, ValueError):
-                continue
-            p = rec.get("rdc")
-            if p and Path(p).is_file():
-                real_rdc = p
-                break
+                return None
+
+        real_rdc = next((p for p in (case_input(c["case"], "rdc") for c in cases)
+                         if p and Path(p).is_file()), None)
+        real_frame = next((p for p in (case_input(c["case"], "frame_dir") for c in cases)
+                           if p and Path(p).is_dir()), None)
+        real_bundle = next((p for p in (case_input(c["case"], "bundle") for c in cases)
+                            if p and Path(p).exists()), None)
+        if not real_frame:
+            # legacy case directories have no case.json; their extract records the dump path
+            for ex in (ROOT / "workspace").glob("*/export/extract.json"):
+                try:
+                    rec = json.loads(ex.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if rec.get("source") == "3dmigoto" and rec.get("rdc") and Path(rec["rdc"]).is_dir():
+                    real_frame = rec["rdc"]
+                    break
         if real_rdc:
             cap = get_json(base, f"/api/capture?path={urllib.parse.quote(real_rdc)}")
             check("capture-inspect", cap.get("ok") is True and cap.get("capture", {}).get("frame"),
                   f"frame {cap.get('capture', {}).get('frame')} size {cap.get('size')}")
             bad = get_json(base, f"/api/capture?path={urllib.parse.quote(str(ROOT / 'pyproject.toml'))}")
-            check("capture-refuses-non-rdc", bad.get("ok") is False and "rdc" in (bad.get("why") or "").lower(),
+            check("capture-refuses-unknown", bad.get("ok") is False and bool(bad.get("why")),
                   bad.get("why") or "")
             try:
                 code, body = post(base, "/api/cases", {"case": probe, "rdc": real_rdc, "title": "验收测试"})
@@ -397,16 +411,66 @@ def main():
                     code, body = post(base, "/api/case/probe-does-not-exist/title", {"title": "x"})
                     check("case-rename-unknown-404", code == 404, f"HTTP {code}")
             finally:
-                import shutil
                 shutil.rmtree(ROOT / "workspace" / probe, ignore_errors=True)
             check("case-create-duplicate-refused",
                   post(base, "/api/cases", {"case": name, "rdc": real_rdc})[0] == 400,
                   "existing case refused")
             check("case-create-bad-id-refused",
                   post(base, "/api/cases", {"case": "../evil", "rdc": real_rdc})[0] == 400, "path traversal refused")
+
+        if real_frame:
+            cap = get_json(base, f"/api/capture?path={urllib.parse.quote(real_frame)}&source=3dmigoto")
+            check("capture-inspect-3dmigoto",
+                  cap.get("ok") is True and cap.get("source") == "3dmigoto" and bool(cap.get("suggested_id")),
+                  f"{cap.get('suggested_id')} files={(cap.get('capture') or {}).get('files')}")
+            auto = get_json(base, f"/api/capture?path={urllib.parse.quote(real_frame)}")
+            check("capture-auto-3dmigoto", auto.get("ok") is True and auto.get("source") == "3dmigoto",
+                  f"source={auto.get('source')}")
+            probe2 = "rf-acceptance-3dmigoto"
+            try:
+                code, body = post(base, "/api/cases",
+                                  {"case": probe2, "source": "3dmigoto", "path": real_frame})
+                rec = {}
+                try:
+                    rec = json.loads((ROOT / "workspace" / probe2 / "case.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
+                same = rec.get("frame_dir") and Path(rec["frame_dir"]).resolve() == Path(real_frame).resolve()
+                check("case-create-3dmigoto",
+                      code == 200 and body.get("start") == "ingest-3dmigoto" and
+                      rec.get("source") == "3dmigoto" and bool(same),
+                      f"HTTP {code} start={body.get('start')} source={rec.get('source')}")
+            finally:
+                shutil.rmtree(ROOT / "workspace" / probe2, ignore_errors=True)
+
+        if real_bundle:
+            cap = get_json(base, f"/api/capture?path={urllib.parse.quote(real_bundle)}&source=unity-bundle")
+            check("capture-inspect-unity",
+                  cap.get("ok") is True and cap.get("source") == "unity-bundle" and
+                  (cap.get("capture") or {}).get("magic"),
+                  f"magic={(cap.get('capture') or {}).get('magic')}")
+            probe3 = "rf-acceptance-unity"
+            try:
+                code, body = post(base, "/api/cases",
+                                  {"case": probe3, "source": "unity-bundle", "path": real_bundle})
+                rec = {}
+                try:
+                    rec = json.loads((ROOT / "workspace" / probe3 / "case.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    pass
+                same = rec.get("bundle") and Path(rec["bundle"]).resolve() == Path(real_bundle).resolve()
+                check("case-create-unity",
+                      code == 200 and body.get("start") == "ingest-unity" and
+                      rec.get("source") == "unity-bundle" and bool(same),
+                      f"HTTP {code} start={body.get('start')} source={rec.get('source')}")
+            finally:
+                shutil.rmtree(ROOT / "workspace" / probe3, ignore_errors=True)
+
         page = get(base, "/")[2].decode("utf-8", "replace")
-        check("new-task-ui-present", 'id="btn-new-case"' in page and 'id="newcase"' in page and 'id="rename"' in page,
-              "new task + rename markup")
+        check("new-task-ui-present",
+              all(k in page for k in ('id="btn-new-case"', 'id="newcase"', 'id="rename"',
+                                      'id="nc-source"', 'id="nc-path"')),
+              "new task + source select + rename markup")
 
         # 8. unknown steps are refused (the tool surface stays as narrow as the MCP server's)
         code, body = post(base, f"/api/case/{name}/run", {"step": "rm -rf"})

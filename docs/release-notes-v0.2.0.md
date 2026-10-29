@@ -1,6 +1,6 @@
 # RenderForge v0.2.0
 
-**未发布**：本文对应 PR [#1](https://github.com/hou36692-bot/RenderForge/pull/1)（`feat/endfield-support`），合并后再发布。当前公开版本仍是 [v0.1.0](https://github.com/hou36692-bot/RenderForge/releases/tag/v0.1.0)。
+**已发布**：本版本从 PR [#1](https://github.com/hou36692-bot/RenderForge/pull/1) 的分支 `feat/endfield-support` 打 tag 发布；`main` 尚未合并这些改动，合并前请以本 tag 为准。上一版是 [v0.1.0](https://github.com/hou36692-bot/RenderForge/releases/tag/v0.1.0)。
 
 这是一个研究型工具箱，不是成品软件。下面每一条都区分“本机实际跑过”和“只是接好了、还没验证”。
 

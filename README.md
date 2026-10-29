@@ -80,9 +80,8 @@ RenderForge 做的就是补上这层语义：
 ### 🟡 绝区零（Unity，3DMigoto 帧分析 → Unity 与 UE）
 
 - 角色模型（身体/头发/鞋）连同贴图能导入两个引擎
-- **但结果还不完整**：头脸缺失（那部分走 GPU 驱动的间接绘制，转储里拿到的是过期参数），身体各部件的位置也还是单位放置、没有对回原姿态。这一路目前只到"数据能读出来"，不构成一张可展示的重建结果
-- 世界矩阵与相机的解码适配器已写好，在矩阵层面验证（72/213 个 draw 是刚性变换，投影剪影 IoU 0.9783）
-- **未接进 CLI、未端到端渲染**——所以出厂路径仍是单位放置，不要按适配器的数字去预期渲染结果
+- 世界矩阵与相机适配器已接进 `build-model`：58 个角色 draw 在世界空间放置，相机取 cb3 的 3840×2160 世界帧；UE 与 Unity 都端到端渲染过，角色直立、全身、贴图完整
+- **仍不完整**：头脸缺失（那部分走 GPU 驱动的间接绘制，转储里拿到的是过期参数）；141/213 个 draw 没有刚性矩阵（UI/非刚性 pass）被跳过；蒙皮仍是 bind pose。参考帧是角色 UI 界面，所以 ssim/mask 数字不代表放置质量（几何证据是 draw 106 的 RT 剪影 IoU 0.9783）
 
 ### 🧪 Unity 资源包 → 场景包（仅合成数据）
 
@@ -119,9 +118,10 @@ RenderForge 做的就是补上这层语义：
 | wuwa_61250 | RenderDoc 帧 61250 | 1017 / 26,944 | 0.393 / 0.242 / 0.077 | 0.332 / 0.275 |
 | wuwa_bridge | RenderDoc 帧 3422 | 681 / 19,192 | 0.339 / 0.300 / 0.149 | 0.333 / 0.272 |
 | wuwa_f3765 | RenderDoc 帧 3765 | 19 / 19 | 0.532 / 0.331 / 0.032 | 0.732 / 0.207 |
-| zzz_frame01 | 3DMigoto | 213 / 58 | 0.212 / 0.328 / 0.131 | 有截图，未打分 |
+| zzz_frame01 | 3DMigoto | 213 / 58 | 0.237 / 0.317 / 0.247 | 0.240 / 0.490 |
 
 SSIM 只能用来比较**同一案例改前改后**，不能跨案例比优劣——不同场景的构图、遮挡、背景占比差别太大。
+`zzz_frame01` 的参考帧是角色 UI 界面：世界相机渲染的 3D 角色和它构图完全不同，这两列数字**不代表**放置质量；几何证据是 draw 106 对转储 RT 剪影的 IoU 0.9783。
 
 Unity 列只是记录：Unity 侧目前有一个未修的问题——捕获的天空穹顶在 Unity 里被渲染到相机前方，整帧被一个巨大的球面挡住，所以那几列数字不代表重建质量。UE 侧的截图正常。
 
@@ -220,10 +220,11 @@ zzz_frame01  3dmigoto   zzz       +survey +export +build -identify +emit-ue +emi
 ```bash
 .venv\Scripts\python.exe -m renderforge ingest-3dmigoto zzz_frame01 --frame-dir <FrameAnalysis-...> --game zzz
 .venv\Scripts\python.exe -m renderforge build-model zzz_frame01 --game zzz
+.venv\Scripts\python.exe -m renderforge ue-import zzz_frame01
 .venv\Scripts\python.exe -m renderforge unity-import zzz_frame01
 ```
 
-3DMigoto 的转储里**没有 post-VS 数据**，所以无法用上面的变换求解，只能按模型空间放置，再乘上游戏档案里记录的基准朝向。
+3DMigoto 的转储里**没有 post-VS 数据**，所以通用变换求解不适用。ZZZ 有一支游戏专用放置适配器（档案里的 `placement_adapter: zzz`）：`build-model` 自动从 VS 常量缓冲解出每 draw 世界矩阵和相机，把角色放进世界空间，并把 `shot` 的 fov/分辨率记录成该相机；`--adapter none` 可强制回到模型空间单位放置。其他游戏没有这个适配器，仍按模型空间 + 档案里的基准朝向放置。
 
 ### 路线三：只有 Unity 资源包（不需要截帧）
 
@@ -261,7 +262,7 @@ cp .mcp.example.json .mcp.json    # 然后把里面的路径改成你的
 .venv\Scripts\python.exe -m renderforge web     # → http://127.0.0.1:8770/
 ```
 
-**任务总览** —— 每个案例的来源、阶段完成度、draw/网格/实例数、VP 拟合、身份覆盖率，右侧挂该案例的原帧。支持新建任务（填本机 `.rdc` 路径）和重命名。
+**任务总览** —— 每个案例的来源、阶段完成度、draw/网格/实例数、VP 拟合、身份覆盖率，右侧挂该案例的原帧。支持新建任务（填本机路径，来源可选 RenderDoc `.rdc` / 3DMigoto FrameAnalysis 目录 / Unity 资源包，也可自动判断）和重命名。
 
 ![任务总览](docs/img/workbench-overview.png)
 

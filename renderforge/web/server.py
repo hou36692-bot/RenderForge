@@ -623,10 +623,14 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         try:
             if path == "/api/cases":
-                # create a task from a capture path: the page cannot upload a multi-GB .rdc, but it can name one
-                # that is already on this disk (where captures live). Seeding only; survey is a normal job after.
+                # create a task from a local path: the page cannot upload a multi-GB capture, but it can name one
+                # that is already on this disk (where captures and dumps live). Seeding only; the first
+                # survey/ingest is a normal job after. `rdc` stays accepted for the older single-source caller.
+                source = body.get("source") or ("rdc" if body.get("rdc") else None)
+                inp = body.get("path") or body.get("rdc") or ""
                 return self._send(200, {"ok": True, **casectl.create(
-                    (body.get("case") or "").strip(), body.get("rdc") or "", body.get("title"), body.get("game"))})
+                    (body.get("case") or "").strip(), inp, source=source,
+                    title=body.get("title"), game=body.get("game"))})
             m = re.match(r"^/api/case/([^/]+)/(run|metrics|export|title)$", path)
             if not m:
                 return self._err(404, f"no POST route {path}")
@@ -673,7 +677,8 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             return self._send(200, _export_state(m.group(1)))
         if path == "/api/capture":
-            return self._send(200, casectl.look((q.get("path") or [""])[0]))
+            return self._send(200, casectl.look((q.get("path") or [""])[0],
+                                                (q.get("source") or [""])[0] or None))
         if path == "/api/jobs":
             return self._send(200, {"jobs": jobs.list_jobs(int(q.get("limit", ["20"])[0]))})
         m = re.match(r"^/api/jobs/([^/]+)(/log)?$", path)

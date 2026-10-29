@@ -64,13 +64,25 @@ TOOLS = [
     {
         "name": "step",
         "description": "Run one named stage of a case (survey, export, build, build-model, ingest-unity, "
-                       "ingest-3dmigoto, identify, ue-import, unity-import, shot, metrics). Returns that stage's "
-                       "result JSON; the outcome is also recorded in case.json under steps.",
+                       "ingest-3dmigoto, identify, ue-import, unity-import, shot, metrics, shaders, capture). Returns "
+                       "that stage's result JSON; the outcome is also recorded in case.json under steps. `capture` "
+                       "is standalone (never part of run): action targets|launch|trigger; launch needs "
+                       "allow_launch=true explicitly.",
         "inputSchema": {"type": "object", "properties": {
             "case": {"type": "string"},
             "step": {"type": "string", "enum": ["survey", "export", "build", "build-model", "ingest-unity",
                                                 "ingest-3dmigoto", "identify", "ue-import", "unity-import", "shot",
-                                                "metrics", "shaders"]},
+                                                "metrics", "shaders", "capture"]},
+            "action": {"type": "string", "enum": ["targets", "launch", "trigger"],
+                       "description": "capture: targets (list), launch (start under RenderDoc), trigger (default)"},
+            "exe": {"type": "string", "description": "capture launch: program to start"},
+            "cmdline": {"type": "string", "description": "capture launch: raw command-line text"},
+            "working_dir": {"type": "string", "description": "capture launch: working directory"},
+            "target_ident": {"type": "integer", "description": "capture trigger: RenderDoc target ident"},
+            "delay": {"type": "number", "description": "capture: seconds to wait first (default 0)"},
+            "timeout": {"type": "number", "description": "capture: seconds to wait for the result (default 60)"},
+            "frames": {"type": "integer", "description": "capture trigger: frames to capture (default 1)"},
+            "allow_launch": {"type": "boolean", "description": "capture launch: must be true to start a program"},
             "eids": {"type": "string", "description": "shaders: comma-separated draw event ids to dump"},
             "vs": {"type": "boolean", "description": "shaders: dump the vertex shader instead of the pixel shader"},
             "rdc": {"type": "string"}, "range": {"type": "string"}, "rt_count": {"type": "integer"},
@@ -127,9 +139,15 @@ _STEPS = {
     "ingest-3dmigoto": pipeline.step_ingest_3dmigoto, "identify": pipeline.step_identify,
     "ue-import": pipeline.step_ue_import, "unity-import": pipeline.step_unity_import,
     "shot": pipeline.step_shot, "metrics": pipeline.step_metrics, "shaders": pipeline.step_shaders,
+    "capture": pipeline.step_capture,
 }
 _STEP_KEYS = ("rdc", "range", "rt_count", "extra_export", "extra_pass", "bundle", "frame_dir", "game", "index",
               "ids", "shot", "max_instances", "emissive", "no_instanced_index", "ticks", "cmd", "eids", "vs")
+# capture-only keys: kept out of _STEP_KEYS so a plain `run` can never receive them
+_CAPTURE_KEYS = ("action", "exe", "cmdline", "working_dir", "target_ident", "delay", "timeout", "frames")
+# step-style capture name -> CLI option name (for job_start)
+_CAPTURE_CLI = {"action": "capture_action", "cmdline": "capture_args", "delay": "capture_delay",
+                "timeout": "capture_timeout", "frames": "capture_frames"}
 
 
 def _call(name, args):
@@ -158,6 +176,10 @@ def _call(name, args):
         if fn is None:
             raise ValueError(f"unknown step '{args['step']}'; known: {', '.join(_STEPS)}")
         kw = {k: v for k, v in args.items() if k in _STEP_KEYS}
+        if args["step"] == "capture":
+            kw.update({k: v for k, v in args.items() if k in _CAPTURE_KEYS and v is not None})
+            kw["allow_launch"] = args.get("allow_launch") is True      # launching a program needs an explicit true
+            return fn(args["case"], **kw)
         if "cmd" not in kw:                       # the shot step needs the console command (fov) from case.json
             kw["cmd"] = (pipeline.load_case(args["case"]).get("shot") or {}).get("console")
         return fn(args["case"], **kw)
@@ -186,12 +208,26 @@ def _argv_for(args):
             argv += [f"--{k}", str(args[k])]
     if args.get("force"):
         argv.append("--force")
-    for k, v in (args.get("extra") or {}).items():
+    extra = dict(args.get("extra") or {})
+    if step == "capture":
+        # step-style top-level capture options (same names as the `step` tool) -> CLI option names
+        for k in _CAPTURE_KEYS + ("game",):
+            if args.get(k) is not None:
+                extra.setdefault(_CAPTURE_CLI.get(k, k), args[k])
+        if args.get("allow_launch") is True:
+            extra["allow_launch"] = True
+        else:
+            extra.pop("allow_launch", None)
+    for k, v in extra.items():
+        opt = f"--{k.replace('_', '-')}"
         if isinstance(v, bool):
             if v:
-                argv.append(f"--{k.replace('_', '-')}")
+                argv.append(opt)
         elif v is not None:
-            argv += [f"--{k.replace('_', '-')}", str(v)]
+            # a value that starts with '-' (a raw command line) must be attached, or argparse reads it as an option
+            argv.append(f"{opt}={v}" if str(v).startswith("-") else opt)
+            if not str(v).startswith("-"):
+                argv.append(str(v))
     return argv
 
 

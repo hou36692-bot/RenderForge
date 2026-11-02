@@ -44,7 +44,7 @@
     <div class="split">
       <aside class="cases">
         <div class="case-tools">
-          <button id="btn-new-case" class="primary" title="从一个 .rdc 截帧新建任务">+ 新建任务</button>
+          <button id="btn-new-case" class="primary" title="从 RenderDoc / 3DMigoto / Unity 输入新建任务">+ 新建任务</button>
           <input id="case-filter" type="search" placeholder="过滤任务…">
         </div>
         <div id="case-list"></div>
@@ -158,14 +158,23 @@
   </div>
   <div class="newcase-body">
     <p class="newcase-note">
-      填截帧在本机上的完整路径（.rdc 通常有 1–2 GB，页面不复制它，只在 <code>workspace/</code> 下登记一个任务目录）。
-      新建后自动跑「截帧分析」，之后在工作流里继续。
+      填输入在本机上的完整路径（页面不复制大文件，只在 <code>workspace/</code> 下登记一个任务目录）。
+      支持 RenderDoc 截帧、3DMigoto FrameAnalysis 转储目录和 Unity 资源包；新建后按来源自动跑第一步，之后在工作流里继续。
     </p>
     <label class="newcase-row">
-      <span>截帧文件</span>
-      <input id="nc-rdc" type="text" placeholder="D:\...\WutheringWaves_dx11_..._frame3422.rdc" spellcheck="false">
+      <span>来源</span>
+      <select id="nc-source">
+        <option value="">自动判断</option>
+        <option value="rdc">RenderDoc 截帧（.rdc）</option>
+        <option value="3dmigoto">3DMigoto 帧分析（FrameAnalysis 目录）</option>
+        <option value="unity-bundle">Unity 资源包（bundle / 目录）</option>
+      </select>
     </label>
-    <button id="nc-inspect" class="ghost">检查文件</button>
+    <label class="newcase-row">
+      <span>输入路径</span>
+      <input id="nc-path" type="text" placeholder="D:\...\frame3422.rdc 或 D:\...\FrameAnalysis-2026-09-28-223512" spellcheck="false">
+    </label>
+    <button id="nc-inspect" class="ghost">检查输入</button>
     <div id="nc-info" class="newcase-info"></div>
     <label class="newcase-row">
       <span>任务 id</span>

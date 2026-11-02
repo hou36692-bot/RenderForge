@@ -49,6 +49,7 @@
    "engine": "unity",
    "engine_version": "Unity (HoYo custom bundles); 3.2.0 in user's evidence",
    "source_space": "unity",
+   "placement_adapter": "zzz",
    "install": "not installed on this machine (evidence only)",
    "packaging": "HoYo custom blocks; CAB map required",
    "capture": [
@@ -65,13 +66,15 @@
    ],
    "verified": [
     "3DMigoto Frame01 (user's, 1.9GB) ingested: 213 draws, 167 meshes, 83 textures decoded, 6 s",
+    "world/camera placement adapter wired into build-model (placement_adapter zzz): 72/213 draws yield a rigid vs-cb1 world matrix; 58 picked character draws all placed; camera from vs-cb0 (frame projection vs-cb3); UE and Unity re-imported and rendered end-to-end",
     "character body/hair/shoes rendered upright and textured in Unity and in UE (model space, unity->ue conversion exercised)",
     "user's earlier UE reconstruction used AnimeStudio exports (verified-prior)"
    ],
    "gaps": [
     "head/face parts missing: ZZZ draws characters via GPU-driven indirect draws whose arguments are not in the dump",
-    "world/camera placement needs ZZZ VS cbuffer decoding (not done)",
-    "skinning pose is whatever was dumped",
+    "141/213 draws (screen-space UI and other non-rigid passes) have no world matrix and are left unplaced, not faked",
+    "the character is emitted in bind pose (POSITION0); skinned animation is not evaluated",
+    "the reference frame is a UI screen: SSIM/mask metrics compare a world-space render against UI art and are not a measure of placement quality (the projection check is draw 106 vs its dumped RT alpha mask, IoU 0.9783)",
     "AnimeStudio cannot be re-run: game not installed"
    ],
    "model_basis": [
@@ -148,7 +151,15 @@
    "capture": [
     "renderdoc"
    ],
-   "capture_notes": "AntiCheatExpert present; injecting into an online game risks account action - not attempted.",
+   "capture_notes": "AntiCheatExpert present. Normal RenderDoc launch is opt-in per request; no protection bypass or global/child hook. Live capture is being tested, not yet verified.",
+   "capture_launch": {
+    "exe": "D:\\Hypergryph Launcher\\games\\Arknights Endfield\\Endfield.exe",
+    "args": "-force-d3d11",
+    "target": "Endfield"
+   },
+   "route_status": {
+    "renderdoc": "candidate"
+   },
    "source": [
     "unitypy",
     "il2cppdumper"
@@ -165,7 +176,7 @@
     "this is the clearest example of a game that needs its own source adapter"
    ],
    "coverage": "extension",
-   "status_note": "Postponed: its containers need a game-specific decryption adapter before any generic tool can read them; anti-cheat also rules out injection on this machine."
+   "status_note": "Capture-first integration: launch/target/trigger use normal RenderDoc APIs with explicit per-request consent. Source export is a separate bounded proof; no full-map preparation is required. Neither route is verified on Endfield yet."
   },
   "generic-unity": {
    "name": "Unity game with standard UnityFS bundles / data files",

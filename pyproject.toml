@@ -1,6 +1,6 @@
 [project]
 name = "renderforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "RenderDoc capture -> Unreal Engine 5.8 scene reconstruction workbench"
 requires-python = ">=3.12"
 dependencies = ["numpy", "pillow"]

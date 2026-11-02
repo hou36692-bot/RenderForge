@@ -94,12 +94,14 @@ caseinfo（案例状态，status） → pipeline（步骤图，run） → metric
 
 `toolbox/games.json` 每个游戏一条：引擎、打包方式、可用截帧路线、可用解包器、`model_basis` 等放置参数、**已验证项和缺口**。
 档案只**选择**工具并记录事实；真正的游戏专用代码放在 `renderforge/adapters/`，一个游戏一个模块，共用同一组函数
-（`read_cbuffers` / `solve_view_proj` / `solve_world` / `apply`），**不被其他游戏引用**。
+（`read_cbuffers` / `solve_view_proj` / `solve_world` / `solve_placement` / `apply`），**不被其他游戏引用**。
 
-目前只有一个：`renderforge/adapters/zzz.py`，从 ZZZ 的 VS 常量缓冲拿每 draw 世界矩阵（`vs-cb1[0..3]`）与相机
-（`vs-cb0[123..126]`）。它在矩阵层验证过（剪影 IoU 0.9783），但**还没接进 CLI**——`build`/`build-model` 没有 adapter 路径，
-`zzz_frame01` 出厂仍走 `build-model` 的单位放置。适配器写出的矩阵**不能再乘** `games.json` 的 `model_basis`
-（会让 IoU 从 0.978 掉到 0.552）。
+目前只有一个：`renderforge/adapters/zzz.py`，从 ZZZ 的 VS 常量缓冲拿每 draw 世界矩阵（`vs-cb1[0..3]`）与相机姿态
+（`vs-cb0[123..126]`）。游戏档案用 `placement_adapter: zzz` 声明它；`build-model` 自动调用 `solve_placement()`，
+把有刚性矩阵的 draw 放进世界空间，并写 `build/scene.json` 的相机。场景相机取 cb3 的 3840×2160 世界帧
+（`frame_camera`），角色预览相机（cb0[95..98]）保留在 `extract_placed.json` 里用于 RT 对比。`--adapter none`
+可强制单位放置。适配器写出的矩阵**不能再乘** `games.json` 的 `model_basis`（会让 IoU 从 0.978 掉到 0.552）。
+矩阵层证据是剪影 IoU 0.9783；端到端 UE/Unity 渲染见 ROADMAP 第 4 项。
 
 ## 许可证与密钥政策
 

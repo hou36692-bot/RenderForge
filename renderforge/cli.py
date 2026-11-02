@@ -30,6 +30,12 @@ RenderDoc route, per case:  survey -> export -> build -> ue-import -> shot
   python -m renderforge shot    <case> [--cmd "viewmode ..."]
   python -m renderforge run     <case> --rdc <file.rdc>        (everything, auto-picks the main scene pass)
 
+Capture (standalone, never part of `run`; Endfield first):
+
+  python -m renderforge capture <case> --game endfield --capture-action targets
+  python -m renderforge capture <case> --game endfield --capture-action launch --exe <game.exe> --allow-launch [--capture-args="..."] [--working-dir <dir>]
+  python -m renderforge capture <case> --game endfield --capture-action trigger [--target-ident N] [--capture-delay S] [--capture-timeout S] [--capture-frames N]
+
 Cases live in workspace/<case>/ ; original .rdc files are only read, never copied or modified.
 """
 import argparse
@@ -151,7 +157,11 @@ def cmd_ue_import(a):
 def cmd_shot(a):
     from .ue_run import run_game_shot
     name = f"{a.case}_ue"
-    rc, logp = run_game_shot(ue_name(a.case), name, wait_ticks=a.ticks, console=a.cmd or f"fov {load_case(a.case).get('hfov', 100)}")
+    c = load_case(a.case)
+    s = c.get("shot") or {}
+    console = a.cmd or s.get("console") or f"fov {c.get('hfov', 100)}"
+    rc, logp = run_game_shot(ue_name(a.case), name, w=int(s.get("w") or 1920), h=int(s.get("h") or 1080),
+                             wait_ticks=a.ticks, console=console)
     src = ROOT / "ue_project" / "RenderForgeUE" / "Saved" / "Screenshots" / "WindowsEditor" / f"{name}.png"
     dst = case_dir(a.case) / "shots"
     dst.mkdir(exist_ok=True)
@@ -206,24 +216,32 @@ def cmd_docs(a):
 def cmd_ingest_3dmigoto(a):
     from .ingest_3dmigoto import ingest
     c = load_case(a.case)
-    c.update({"source": "3dmigoto", "frame_dir": str(Path(a.frame_dir).resolve())})
+    # the path can come from the case manifest: the workbench creates a case with its input already recorded and
+    # then starts this as a plain job, without repeating the argument
+    frame_dir = a.frame_dir or c.get("frame_dir")
+    if not frame_dir:
+        print("ingest-3dmigoto needs --frame-dir <FrameAnalysis-...> (or a case.json that records frame_dir)")
+        return 2
+    c.update({"source": "3dmigoto", "frame_dir": str(Path(frame_dir).resolve())})
     if a.game:
         c["game"] = a.game
     save_case(a.case, c)
-    ref = Path(a.frame_dir).resolve().parent / "final-output.png"
-    r = ingest(a.frame_dir, case_dir(a.case) / "export", reference_png=ref)
+    ref = Path(frame_dir).resolve().parent / "final-output.png"
+    r = ingest(frame_dir, case_dir(a.case) / "export", reference_png=ref)
     print("ingest:", r)
     return 0
 
 
 def cmd_build_model(a):
     import numpy as np
+    from . import pipeline
     from .build import build_model_space
     from .solve import Extract
+    from . import caseinfo
     c = load_case(a.case)
-    games = json.loads((ROOT / "toolbox" / "games.json").read_text(encoding="utf-8"))["games"]
-    g = games.get(a.game or c.get("game", ""), {})
+    game = a.game or c.get("game") or caseinfo.scan(a.case).get("game")
     ex = Extract(case_dir(a.case) / "export")
+    placement, ad, g = pipeline.model_space_placement(a.case, ex, game=game, adapter=a.adapter, frame_dir=a.frame_dir)
     max_ext = a.max_extent
 
     def pick(d):
@@ -234,8 +252,15 @@ def cmd_build_model(a):
         p = ex.mesh_attr(d["mesh"], names["POSITION0"])[:, :3]
         return float(np.ptp(p, axis=0).max()) < max_ext and m["indices"] // 3 >= a.min_tris
 
-    sc = build_model_space(case_dir(a.case) / "export", case_dir(a.case) / "build", g.get("source_space", "unity"), pick=pick, basis=g.get("model_basis"))
-    print("build-model:", sc["report"], "meshes", len(sc["meshes"]), "materials", len(sc["materials"]))
+    sc = build_model_space(case_dir(a.case) / "export", case_dir(a.case) / "build", g.get("source_space", "unity"),
+                           pick=pick, basis=None if placement else g.get("model_basis"), placement=placement)
+    pipeline.save_model_space_options(a.case, sc, ad, game, a.max_extent, a.min_tris, placement)
+    print("build-model:", sc["report"], "meshes", len(sc["meshes"]), "materials", len(sc["materials"]),
+          "adapter", ad or "none")
+    if placement:
+        cam = sc.get("camera") or {}
+        print(f"placement: {placement['world_ok']}/{placement['draws']} draws have a rigid world matrix"
+              + (f"; camera hfov {cam['hfov_deg']:.2f}" if cam.get("hfov_deg") else ""))
     return 0
 
 
@@ -300,9 +325,13 @@ def cmd_identify(a):
 def cmd_ingest_unity(a):
     from .ingest_unity import ingest_bundle
     c = load_case(a.case)
-    c.update({"source": "unity-bundle", "bundle": str(Path(a.bundle).resolve())})
+    bundle = a.bundle or c.get("bundle")     # same fallback as ingest-3dmigoto: the case may already record it
+    if not bundle:
+        print("ingest-unity needs --bundle <Unity bundle> (or a case.json that records bundle)")
+        return 2
+    c.update({"source": "unity-bundle", "bundle": str(Path(bundle).resolve())})
     save_case(a.case, c)
-    sc = ingest_bundle(a.bundle, case_dir(a.case) / "build")
+    sc = ingest_bundle(bundle, case_dir(a.case) / "build")
     print("ingest-unity:", sc["report"], "meshes", len(sc["meshes"]), "materials", len(sc["materials"]), "textures", len(sc["textures"]))
     return 0
 
@@ -316,7 +345,7 @@ def cmd_run(a):
                        ids=a.ids, no_instanced_index=a.no_instanced_index, emissive=a.emissive,
                        eids=a.eids, vs=a.vs,
                        max_extent=a.max_extent, min_tris=a.min_tris, bundle=a.bundle, frame_dir=a.frame_dir,
-                       game=a.game)
+                       adapter=a.adapter, game=a.game)
     print(f"steps ran: {[r['step'] for r in res['ran']] or 'none'}")
     for r in res["ran"]:
         print(f"  + {r['step']}: {r['result']}")
@@ -337,6 +366,23 @@ def cmd_shaders(a):
     res = pipeline.step_shaders(a.case, eids=a.eids, vs=a.vs)
     print(f"shaders rc={res['rc']} unique={res['unique']} -> {res['out']}")
     return 0 if res["rc"] == 0 else 1
+
+
+def cmd_capture(a):
+    """Standalone RenderDoc capture request (not part of `run`). Prints the JSON result; exit 0 only when ok."""
+    from . import pipeline
+    if not a.case:
+        print(json.dumps({"ok": False, "error": "capture needs a case name"}))
+        return 1
+    try:
+        res = pipeline.step_capture(a.case, action=a.capture_action, game=a.game, exe=a.exe, cmdline=a.capture_args,
+                                    working_dir=a.working_dir, target_ident=a.target_ident, delay=a.capture_delay,
+                                    timeout=a.capture_timeout, frames=a.capture_frames,
+                                    allow_launch=a.allow_launch)
+    except Exception as e:  # noqa: BLE001 - report as JSON like the other result-producing commands
+        res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
+    return 0 if isinstance(res, dict) and res.get("ok") is True else 1
 
 
 def cmd_status(a):
@@ -409,7 +455,7 @@ def main(argv=None):
                      ("doctor", cmd_doctor), ("plan", cmd_plan), ("docs", cmd_docs), ("ingest-3dmigoto", cmd_ingest_3dmigoto),
                      ("build-model", cmd_build_model), ("ingest-unity", cmd_ingest_unity), ("unity-import", cmd_unity_import), ("match", cmd_match),
                      ("identify", cmd_identify), ("status", cmd_status), ("metrics", cmd_metrics), ("backfill", cmd_backfill), ("shaders", cmd_shaders),
-                     ("selftest", cmd_selftest), ("web", cmd_web)):
+                     ("selftest", cmd_selftest), ("web", cmd_web), ("capture", cmd_capture)):
         p = sub.add_parser(name)
         p.add_argument("case", nargs="?", default="")
         p.add_argument("--game")
@@ -422,6 +468,7 @@ def main(argv=None):
         p.add_argument("--apply", action="store_true")
         p.add_argument("--max-extent", type=float, default=3.0)
         p.add_argument("--min-tris", type=int, default=100)
+        p.add_argument("--adapter", help="build-model: per-game placement adapter (zzz), or 'none' for identity")
         p.add_argument("--rdc")
         p.add_argument("--range")
         p.add_argument("--rt-count", type=int)
@@ -443,6 +490,18 @@ def main(argv=None):
         p.add_argument("--write", action="store_true", help="backfill: actually write case.json")
         p.add_argument("--port", type=int, default=8770, help="web: port for the local workbench")
         p.add_argument("--host", default="127.0.0.1", help="web: bind address (127.0.0.1 keeps it local)")
+        if name == "capture":
+            p.add_argument("--capture-action", choices=("targets", "launch", "trigger"), default="trigger",
+                           help="capture: list RenderDoc targets, launch the program under RenderDoc, or trigger a capture")
+            p.add_argument("--exe", help="capture launch: program to start")
+            p.add_argument("--capture-args", help="capture launch: raw command-line text (use --capture-args=\"-x\" for leading dashes)")
+            p.add_argument("--working-dir", help="capture launch: working directory")
+            p.add_argument("--target-ident", type=int, help="capture trigger: RenderDoc target ident (from targets)")
+            p.add_argument("--capture-delay", type=float, default=0.0, help="capture: seconds to wait before acting")
+            p.add_argument("--capture-timeout", type=float, default=60.0, help="capture: seconds to wait for the result")
+            p.add_argument("--capture-frames", type=int, default=1, help="capture trigger: number of frames to capture")
+            p.add_argument("--allow-launch", action="store_true",
+                           help="capture launch: explicit permission to start the program (never persisted)")
         p.set_defaults(fn=fn)
     a = ap.parse_args(argv)
     return a.fn(a)

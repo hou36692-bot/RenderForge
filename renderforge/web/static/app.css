@@ -100,7 +100,7 @@ dialog.newcase::backdrop { background: rgba(6, 7, 9, .8); }
 .newcase-note code { background: var(--panel-2); padding: 0 4px; border-radius: 3px; }
 .newcase-row { display: grid; grid-template-columns: 72px 1fr; gap: 8px; align-items: center; font-size: 12px; }
 .newcase-row em { grid-column: 2; font-size: 11px; color: var(--dim); font-style: normal; }
-.newcase-row input {
+.newcase-row input, .newcase-row select {
   padding: 6px 9px; background: var(--panel-2); border: 1px solid var(--line);
   border-radius: var(--radius); color: inherit; font-size: 12px; width: 100%;
 }

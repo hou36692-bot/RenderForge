@@ -178,14 +178,68 @@ def step_build(case, rt_count=None, extra_export=None, extra_pass="extra", **kw)
             "report": sc.get("report")}
 
 
-def step_build_model(case, game=None, max_extent=3.0, min_tris=100, **kw):
+def model_space_placement(case, ex, game=None, adapter=None, frame_dir=None):
+    """Resolve the per-game placement adapter for a model-space build and compute its placement.
+
+    Returns (placement, adapter_name, profile). `placement` is None when the case stays at identity (no
+    adapter, or `adapter="none"`). The adapter's annotated extract is written beside the export so the
+    placement stays reviewable, and the cbuffer solve is done once (apply() receives it).
+    """
+    from .adapters import placement_adapter
+    c = load_case(case)
+    game = game or c.get("game")
+    if not game:
+        # legacy directories have no case.json; the profile is inferred from the capture path
+        game = caseinfo.scan(case).get("game")
+    g = caseinfo._json(ROOT / "toolbox" / "games.json", {}).get("games", {}).get(game or "", {})
+    name = adapter if adapter is not None else (c.get("build_model") or {}).get("adapter") or g.get("placement_adapter")
+    if not name or name == "none":
+        return None, None, g
+    frame_dir = frame_dir or c.get("frame_dir")
+    if not frame_dir:
+        # legacy case directories have no case.json; their export records the FrameAnalysis path
+        info = caseinfo.scan(case)
+        frame_dir = info.get("input") if info.get("source") == "3dmigoto" else None
+    if not frame_dir:
+        raise ValueError(f"build-model --adapter {name} needs --frame-dir <FrameAnalysis-...>")
+    mod = placement_adapter(name)
+    pl = mod.solve_placement(frame_dir, ex.data)
+    mod.apply(frame_dir, Path(ex.root) / "extract.json", Path(ex.root) / "extract_placed.json", placement=pl)
+    return pl, name, g
+
+
+def save_model_space_options(case, scene, adapter, game, max_extent, min_tris, placement=None):
+    """Persist what a `build-model` run used, so a re-run reproduces it and `shot` uses the capture camera.
+
+    With an adapter, `hfov` and `shot.console/w/h` are refreshed from the scene camera every build, because
+    they are properties of that captured camera, not user choices; set `shot.auto = false` to keep custom
+    values. The size comes from the scene camera's pass (ZZZ's world frame is 3840x2160), not the generic
+    1920x1080. Without an adapter, nothing here is touched.
+    """
+    ensure_case(case)       # legacy directories get source/game/input seeded before this writes the manifest
+    c = load_case(case)
+    c["build_model"] = {"adapter": adapter, "game": game, "max_extent": max_extent, "min_tris": min_tris}
+    cam = (scene or {}).get("camera") or {}
+    if placement and cam.get("hfov_deg"):
+        shot = c.setdefault("shot", {})
+        if shot.get("auto", True):
+            c["hfov"] = round(float(cam["hfov_deg"]), 2)
+            shot["console"] = f"fov {c['hfov']}"
+            size = placement.get("scene_size") or placement.get("preview_size")
+            if size:
+                shot["w"], shot["h"] = int(size[0]), int(size[1])
+            shot["auto"] = True
+    save_case(case, c)
+
+
+def step_build_model(case, game=None, max_extent=3.0, min_tris=100, adapter=None, frame_dir=None, **kw):
     import numpy as np
     from .build import build_model_space
     from .solve import Extract
     c = load_case(case)
-    games = caseinfo._json(ROOT / "toolbox" / "games.json", {}).get("games", {})
-    g = games.get(game or c.get("game", ""), {})
+    game = game or c.get("game") or caseinfo.scan(case).get("game")
     ex = Extract(_case_dir(case) / "export")
+    placement, ad, g = model_space_placement(case, ex, game=game, adapter=adapter, frame_dir=frame_dir)
 
     def pick(d):
         m = ex.meshes[d["mesh"]]
@@ -196,11 +250,15 @@ def step_build_model(case, game=None, max_extent=3.0, min_tris=100, **kw):
         return float(np.ptp(p, axis=0).max()) < max_extent and m["indices"] // 3 >= min_tris
 
     sc = build_model_space(_case_dir(case) / "export", _case_dir(case) / "build", g.get("source_space", "unity"),
-                           pick=pick, basis=g.get("model_basis"))
-    _ok(case, "build-model", game=game or c.get("game"), meshes=len(sc["meshes"]),
-        instances=len(sc["instances"]), report=sc.get("report"))
+                           pick=pick, basis=None if placement else g.get("model_basis"), placement=placement)
+    save_model_space_options(case, sc, ad, game, max_extent, min_tris, placement)
+    _ok(case, "build-model", game=game, adapter=ad, meshes=len(sc["meshes"]),
+        instances=len(sc["instances"]), placement=(sc.get("report") or {}).get("placement"),
+        world_ok=(placement or {}).get("world_ok"), world_fail=(placement or {}).get("world_fail"),
+        report=sc.get("report"))
     return {"meshes": len(sc["meshes"]), "materials": len(sc["materials"]), "instances": len(sc["instances"]),
-            "report": sc.get("report")}
+            "adapter": ad, "placement": (sc.get("report") or {}).get("placement"),
+            "camera": sc.get("camera"), "report": sc.get("report")}
 
 
 def step_ue_import(case, max_instances=None, emissive=False, **kw):
@@ -245,8 +303,13 @@ def step_shot(case, ticks=900, cmd=None, **kw):
     from .ue_run import run_game_shot
     name = f"{case}_ue"
     c = load_case(case)
-    console = cmd or (c.get("shot") or {}).get("console") or f"fov {c.get('hfov', 100)}"
-    rc, logp = run_game_shot(_ue_name(case), name, wait_ticks=ticks, console=console)
+    s = c.get("shot") or {}
+    console = cmd or s.get("console") or f"fov {c.get('hfov', 100)}"
+    # an adapter camera can have a non-16:9 aspect (ZZZ's character preview is 2880x1368); the build records
+    # that size with the shot options, so the screenshot uses the same projection as the capture pass
+    w = int(kw.get("w") or s.get("w") or 1920)
+    h = int(kw.get("h") or s.get("h") or 1080)
+    rc, logp = run_game_shot(_ue_name(case), name, w=w, h=h, wait_ticks=ticks, console=console)
     src = ROOT / "ue_project" / "RenderForgeUE" / "Saved" / "Screenshots" / "WindowsEditor" / f"{name}.png"
     dst = _case_dir(case) / "shots"
     dst.mkdir(exist_ok=True)
@@ -255,10 +318,11 @@ def step_shot(case, ticks=900, cmd=None, **kw):
         _fail(case, "shot", f"no screenshot; see {logp}" + (f" | {hint}" if hint else ""))
         raise RuntimeError(f"no screenshot produced; see {logp}" + (f" | {hint}" if hint else ""))
     shutil.copy(src, dst / src.name)
-    c["shot"] = {"console": console, "ticks": ticks}   # a re-shot months later must use the same fov
+    # keep other shot options (the adapter's `auto` flag) and record what this shot actually used
+    c["shot"] = {**s, "console": console, "ticks": ticks, "w": w, "h": h}
     save_case(case, c)
-    _ok(case, "shot", file=src.name, console=console, log=str(logp))
-    return {"shot": str(dst / src.name), "console": console}
+    _ok(case, "shot", file=src.name, console=console, w=w, h=h, log=str(logp))
+    return {"shot": str(dst / src.name), "console": console, "w": w, "h": h}
 
 
 def step_shaders(case, eids=None, vs=False, **kw):
@@ -280,6 +344,54 @@ def step_shaders(case, eids=None, vs=False, **kw):
     sh = caseinfo._json(out / "shaders.json", {}) or {}
     _ok(case, "shaders", rc=rc, unique=len(sh.get("shaders") or []), vs=bool(vs))
     return {"rc": rc, "unique": len(sh.get("shaders") or []), "out": str(out)}
+
+
+def _captured_paths(res, case_rdc=None):
+    """Capture file paths named by a capture.request result (several spellings, flat or nested), plus case.json rdc."""
+    found = []
+
+    def add(v):
+        if isinstance(v, str) and v:
+            found.append(v)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                add(x.get("path") if isinstance(x, dict) else x)
+        elif isinstance(v, dict):
+            add(v.get("path"))
+
+    for k in ("rdc", "capture", "capture_path", "captured", "captures", "path", "file", "files"):
+        add((res or {}).get(k))
+    if not found:                      # request() also writes case.json itself; use it only when the result names nothing
+        add(case_rdc)
+    return found
+
+
+def step_capture(case, action="trigger", game=None, exe=None, cmdline=None, working_dir=None, target_ident=None,
+                 delay=0, timeout=60, frames=1, allow_launch=False, **kw):
+    """Standalone RenderDoc capture request (targets / launch / trigger). Never part of the `run` graph: it can start
+    a program, so it only runs when asked for, and `launch` needs an explicit allow_launch=True.
+
+    The step is marked done only for a successful `trigger` whose capture file exists; `launch`/`targets` return
+    their result without claiming a capture."""
+    from . import capture
+    action = action or "trigger"
+    res = capture.request(_case_dir(case), action=action, game=game, exe=exe, cmdline=cmdline,
+                          working_dir=working_dir, target_ident=target_ident, delay=delay, timeout=timeout,
+                          frames=frames, allow_launch=bool(allow_launch))
+    res = res if isinstance(res, dict) else {"ok": False, "error": f"capture.request returned {type(res).__name__}"}
+    if res.get("ok") is not True:
+        err = res.get("error") or res.get("message") or json.dumps(res, ensure_ascii=False, default=str)[:500]
+        _fail(case, "capture", f"{action}: {err}")
+        return res
+    if action == "trigger":
+        paths = _captured_paths(res, load_case(case).get("rdc"))
+        hit = next((p for p in paths if Path(p).exists()), None)
+        if not hit:
+            res = {**res, "ok": False, "error": "trigger reported ok but no capture file exists on disk"}
+            _fail(case, "capture", res["error"])
+            return res
+        _ok(case, "capture", action=action, rdc=str(hit))
+    return res
 
 
 def step_identify(case, index=None, ids=None, apply=True, **kw):
@@ -369,7 +481,10 @@ def _shot_file(case):
 def _graph(source):
     """Ordered steps for a source. `writes` decides whether a step is already done."""
     if source == "3dmigoto":
-        return [("build-model", step_build_model, ["build/scene.json"])]
+        # ingest first, like the Unity route: its artifact is the Extract Package every later step reads, and having
+        # it in the graph is what lets a case created from the workbench show what it is waiting for.
+        return [("ingest-3dmigoto", step_ingest_3dmigoto, ["export/extract.json"]),
+                ("build-model", step_build_model, ["build/scene.json"])]
     if source == "unity-bundle":
         return [("ingest-unity", step_ingest_unity, ["build/scene.json"])]
     rows = [("survey", step_survey, ["survey/survey.json"]),
@@ -486,7 +601,11 @@ def _inputs(case, name, kw):
     if name in ("export", "build", "ue-import", "shot", "emit-ue", "emit-unity"):
         return ""
     if name == "ingest-3dmigoto":
-        return "" if (kw.get("frame_dir") or c.get("frame_dir")) else "--frame-dir <FrameAnalysis-...>"
+        if kw.get("frame_dir") or c.get("frame_dir"):
+            return ""
+        # legacy directories have no case.json; the export records the dump path even when the dir was backfilled
+        info = caseinfo.scan(case)
+        return "" if info.get("source") == "3dmigoto" and info.get("input") else "--frame-dir <FrameAnalysis-...>"
     if name == "ingest-unity":
         return "" if (kw.get("bundle") or c.get("bundle")) else "--bundle <Unity bundle>"
     return ""

@@ -267,6 +267,11 @@ async function startStep(step, force) {
     if (step === "run") {
       payload.to = null;
     }
+    // Ingest steps normally read the path from case.json. Legacy directories do not record one, so pass what the
+    // case detail resolved; the server already accepts these fields (frame_dir / bundle).
+    const src = (state.detail && state.detail.input) || "";
+    if (step === "ingest-3dmigoto" && src) payload.frame_dir = src;
+    if (step === "ingest-unity" && src) payload.bundle = src;
     const r = await api(`/api/case/${encodeURIComponent(state.case)}/run`, { method: "POST", body: JSON.stringify(payload) });
     toast(`已启动：${step}（作业 ${r.job.id}）`);
     await refreshAll();
@@ -483,7 +488,7 @@ function renderAssets() {
   observeLazy(grid);
 }
 
-const KIND_LABEL = { static: "静态", translucent: "透明", baked: "烘焙", water: "水" };
+const KIND_LABEL = { static: "静态", translucent: "透明", baked: "烘焙", water: "水", placed: "世界放置" };
 
 function syncFilterChips() {
   const f = state.filters;
@@ -556,7 +561,8 @@ async function saveRename() {
 
 function openNewCase() {
   const dlg = $("#newcase");
-  $("#nc-rdc").value = "";
+  $("#nc-path").value = "";
+  $("#nc-source").value = "";
   $("#nc-id").value = "";
   $("#nc-title").value = "";
   $("#nc-info").replaceChildren();
@@ -564,28 +570,52 @@ function openNewCase() {
   $("#nc-create").disabled = true;
   state.newCase = null;
   if (!dlg.open) dlg.showModal();
-  $("#nc-rdc").focus();
+  $("#nc-path").focus();
+}
+
+function fmtSize(n) {
+  if (!n && n !== 0) return "";
+  if (n >= 1073741824) return `${(n / 1073741824).toFixed(2)} GB`;
+  if (n >= 1048576) return `${(n / 1048576).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+function describeInput(r) {
+  const cap = r.capture || {};
+  const size = r.size ? ` · ${fmtSize(r.size)}` : "";
+  if (r.source === "rdc") {
+    return `RenderDoc 截帧${size}` + (cap.frame ? ` · 帧 ${cap.frame}` : "") +
+      (cap.api ? ` · ${cap.api.toUpperCase()}` : "") + (cap.captured ? ` · 捕获于 ${cap.captured}` : "");
+  }
+  if (r.source === "3dmigoto") {
+    return `3DMigoto 帧分析${size} · ${cap.files ?? "?"} 个文件` +
+      (cap.draw_calls ? ` · ${cap.draw_calls} 次 draw/dispatch` : "") +
+      (cap.reference ? " · 有参考帧 final-output.png" : " · 没有参考帧");
+  }
+  if (r.source === "unity-bundle") {
+    return `Unity 资源包（${cap.magic}）${size} · ${cap.files ?? 1} 个文件`;
+  }
+  return r.source || "未知来源";
 }
 
 async function inspectCapture() {
-  const p = $("#nc-rdc").value.trim();
+  const p = $("#nc-path").value.trim();
+  const source = $("#nc-source").value;
   const info = $("#nc-info");
   $("#nc-create").disabled = true;
   state.newCase = null;
-  if (!p) { info.replaceChildren(h("div", { class: "why err", text: "先填截帧路径" })); return; }
+  if (!p) { info.replaceChildren(h("div", { class: "why err", text: "先填本机路径" })); return; }
   info.replaceChildren(h("div", { class: "why", text: "检查中…" }));
   try {
-    const r = await api(`/api/capture?path=${encodeURIComponent(p)}`);
+    const r = await api(`/api/capture?path=${encodeURIComponent(p)}` +
+      (source ? `&source=${encodeURIComponent(source)}` : ""));
     if (!r.ok) {
-      info.replaceChildren(h("div", { class: "why err", text: r.why || "不是可用的截帧" }));
+      info.replaceChildren(h("div", { class: "why err", text: r.why || "无法识别这个输入" }));
       return;
     }
     state.newCase = r;
-    const cap = r.capture || {};
-    info.replaceChildren(h("div", { class: "why ok",
-      text: `RenderDoc 截帧 · ${(r.size / 1073741824).toFixed(2)} GB` +
-            (cap.frame ? ` · 帧 ${cap.frame}` : "") + (cap.api ? ` · ${cap.api.toUpperCase()}` : "") +
-            (cap.captured ? ` · 捕获于 ${cap.captured}` : "") }));
+    info.replaceChildren(h("div", { class: "why ok", text: describeInput(r) }));
     if (!$("#nc-id").value.trim()) $("#nc-id").value = r.suggested_id;
     $("#nc-create").disabled = false;
   } catch (e) {
@@ -601,16 +631,22 @@ async function createCase() {
   $("#nc-status").textContent = "创建中…";
   try {
     const r = await api("/api/cases", { method: "POST",
-      body: JSON.stringify({ case: id, rdc: state.newCase.rdc, title, game: state.newCase.capture?.game_hint }) });
+      body: JSON.stringify({ case: id, source: state.newCase.source, path: state.newCase.input, title,
+                             game: state.newCase.game_hint || undefined }) });
     $("#newcase").close();
     await loadCases();
     await selectCase(r.case);
-    // creating the directory is cheap; the survey is the expensive part, so it starts as a normal job right away
+    // creating the directory is cheap; the expensive first step is a normal job. Its name depends on the source,
+    // and the input is passed along so it also works for a case whose manifest is incomplete.
+    const payload = { step: r.start };
+    if (r.start === "ingest-3dmigoto") payload.frame_dir = r.input;
+    if (r.start === "ingest-unity") payload.bundle = r.input;
     try {
-      await api(`/api/case/${encodeURIComponent(r.case)}/run`, { method: "POST", body: JSON.stringify({ step: "survey" }) });
-      toast(`已创建 ${caseTitle({ case: r.case, title })}，截帧分析已开始`);
+      await api(`/api/case/${encodeURIComponent(r.case)}/run`, { method: "POST", body: JSON.stringify(payload) });
+      const started = { survey: "截帧分析", "ingest-3dmigoto": "3DMigoto 摄入", "ingest-unity": "Unity 摄入" }[r.start] || r.start;
+      toast(`已创建 ${caseTitle({ case: r.case, title })}，${started}已开始`);
     } catch (e) {
-      toast(`已创建 ${r.case}，但自动分析没启动：${e.message}`, true);
+      toast(`已创建 ${r.case}，但自动运行没启动：${e.message}`, true);
     }
     await refreshAll();
   } catch (e) {
@@ -1030,7 +1066,8 @@ function boot() {
   $("#btn-pick").addEventListener("click", openPicker);
   $("#btn-new-case").addEventListener("click", openNewCase);
   $("#nc-inspect").addEventListener("click", inspectCapture);
-  $("#nc-rdc").addEventListener("change", inspectCapture);
+  $("#nc-path").addEventListener("change", inspectCapture);
+  $("#nc-source").addEventListener("change", () => { if ($("#nc-path").value.trim()) inspectCapture(); });
   $("#nc-create").addEventListener("click", createCase);
   $("#newcase .newcase-close").addEventListener("click", () => $("#newcase").close());
   $("#rename .rename-close").addEventListener("click", () => $("#rename").close());

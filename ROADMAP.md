@@ -26,7 +26,7 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
 | 游戏 | 引擎 | 截帧 | 摄入 | 源资源读取 | 对账 | UE 5.8 | Unity | 主要缺口 |
 |---|---|---|---|---|---|---|---|---|
 | 鸣潮 WuWa | UE4 | RenderDoc ✅ | ✅ | CUE4Parse ✅(用户) | 全库索引，96% 实例带源名 | ✅ | ✅ | 透明 pass 已合并、逐材质混合模式已分；水面可见（UV 缺失已用世界投影绕过），但水线/泡沫/折射未还原；粒子/billboard 跳过；天空用引擎大气，游戏天空未还原 |
-| 绝区零 ZZZ | Unity | 3DMigoto ✅ | ✅ | AnimeStudio ✅(用户,游戏未装) | 矩阵已验证、**未接 CLI** | ✅ 角色 | ✅ 角色 | 头/脸(GPU 间接绘制)；世界放置适配器已写但没接进 `build`，也没端到端渲染过 |
+| 绝区零 ZZZ | Unity | 3DMigoto ✅ | ✅ | AnimeStudio ✅(用户,游戏未装) | 世界矩阵+相机已接 `build-model`，58 角色实例放置 | ✅ 角色 | ✅ 角色 | 头/脸(GPU 间接绘制)；141/213 draw 无刚性矩阵（UI pass）；bind pose；参考帧是 UI 界面，指标不能当放置质量 |
 | 原神 / 星铁 | Unity | 3DMigoto(未测) | 预期可用 | AnimeStudio(未测) | ⬜ | ⬜ | ⬜ | 本机无安装、无截帧：全部未验证 |
 | 终末地 Endfield | Unity 2021.3 IL2CPP | 未试(有反作弊) | — | ⚠ VFS 加密，通用工具打不开 | ⬜ | ⬜ | ⬜ | 需要游戏专用源适配器；先确认是否要做 |
 | 通用 Unity 包 | Unity | — | UnityPy ✅(合成) | UnityPy/AssetRipper ✅(合成) | — | ✅(合成) | ✅(合成) | 没有本机可读的商业游戏样本 |
@@ -55,12 +55,15 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
    **协议级验收已做**：`scripts/dev/mcp_acceptance.py` 用原始 JSON-RPC over stdio 对服务器本身跑 14 项检查（initialize / tools-list / doctor / plan / status / CLI 一致性 / step-build / metrics 一致性 / 缺图 isError / 错误后仍存活），**14/14，约 10 s**。
    **仍未做**：全新 Claude 会话只用 MCP 工具走一遍。协议测试与"会话真的能这么用"不等价。
    注意：这个验收会 `step build` 重建 `wuwa_f3765`，因此 running 之后 `status` 会报 `emit-unity` 过期（build/scene.json 比 Unity 结果新）——这是正常的，不是回归。
-4. 🟡 绝区零适配器（**部分完成**）：`renderforge/adapters/zzz.py` 已实现并验证在矩阵层面。
-   - 每 draw 世界矩阵取自 `vs-cb1[0..3]`；相机取自 `vs-cb0[123..126]`（camera-to-world，其第 3 行与 `vs-cb0[126]` 存的 eye 字面量**误差 0.0**）；view 取自 `vs-cb0[119..122]`。
-   - 213 个 draw 里 **72 个**给出刚性世界矩阵；其余是屏幕空间 UI pass，如实报告、不伪造。
+4. ✅ 绝区零适配器（**已接进 build**）：`renderforge/adapters/zzz.py` 的矩阵结论不变，本轮把它接进了构建路径。
+   - 每 draw 世界矩阵取自 `vs-cb1[0..3]`；相机姿态取自 `vs-cb0[123..126]`（camera-to-world，其第 3 行与 `vs-cb0[126]` 的 eye 字面量**误差 0.0**）；view 取自 `vs-cb0[119..122]`。
+   - 213 个 draw 里 **72 个**给出刚性世界矩阵；通过 `build-model` pick 的 **58 个角色 draw 全部有矩阵并放置**，其余 141 个是屏幕空间 UI/非刚性 pass，如实报告、不伪造。
    - 证据：draw 106 用单位基投影与转储的 2880×1368 剪影 **IoU 0.9783**（需 +632 px 的 x 平移，由 `vs-cb0[21].x == -0.44` 的屏幕空间项解释）；若再叠 `games.json` 的 `model_basis` 则降到 **0.5524**，所以这些矩阵上**不能**再乘 basis。
-   - **未接 CLI**（`build`/`build-model` 没有 adapter 路径），**未端到端渲染过**。`workspace/zzz_frame01/export/extract_placed.json` 是适配器写出的标注副本，出厂路径仍然走 `build-model` 的单位放置。
-   - 头脸缺失（GPU 间接绘制）仍未绕过。
+   - **接入方式**：游戏档案 `zzz -> placement_adapter: zzz`；`build-model` 自动调用 `solve_placement()`，把 58 个实例（世界矩阵 + `decompose` 出的 TRS）和相机写进 `build/scene.json`，并把标注副本留在 `export/extract_placed.json`。`--adapter none` 可回到单位放置；其他游戏没有这个字段，行为不变。
+   - **相机**：场景用 cb3 的 3840×2160 世界帧（hfov 91.49 / vfov 60），不是角色预览的 2880×1368 / vfov 24；两个相机同姿态，`extract_placed.json` 同时保留 `camera`（preview）与 `frame_camera`。`shot` 的 `fov`/分辨率由构建记录，分辨率不再固定 1920×1080。
+   - **端到端**：`ue-import` 15 meshes / 7 materials / 58 instances，4K 截图里角色直立、全身、位于画面中央；`unity-import` 同样 58 实例，Unity 截图里脸、头发、裙子、剑与贴图都完整。UE 截图偏暗是引擎默认光照 + 预览级材质，不是放置错误。
+   - 指标：UE ssim 0.2368 / mae 0.3167 / coverage_error 0.2473；Unity ssim 0.2400 / mae 0.4902 / coverage_error 0.7383。**这些数字不能当作放置质量**：参考帧是 UI 角色界面，场景是从世界相机渲染的 3D 角色，前景/背景构成完全不同；UE 那张甚至被方向检测误判为 flipped。几何证据仍是 draw 106 的 RT 剪影 IoU。
+   - 头脸缺失（GPU 间接绘制）、蒙皮姿态（POSITION0 = bind pose）仍未解决。
 5. ✅ 材质 PBR 通道语义：**已调查，结论是否定的**。线性伴随贴图**不是** ORM：`o3.xyz = lerp(t2.rgb, 1.0, saturate(cb0[279].w))` 是被标量混向白的三通道色调；`o2.y` 是对 `R32_FLOAT` 遮罩采样乘 10 后取 `min`；着色器里没有 roughness/metallic 参数，PBR 输入来自逐材质 cbuffer 标量与 3D LUT（`t5`/`t6`）；贴图槽位在不同 draw 间不稳定。把那些图接成粗糙度等于凭空发明材质响应。
    真正的路径是解码逐材质常量块（`ps3`）。证据链见 [docs/MATERIAL_SEMANTICS.md](docs/MATERIAL_SEMANTICS.md)，不要在这里重复。
 6. ✅ 验证指标 + 回归夹具：`metrics`（BT.601 亮度 8×8 均匀窗 SSIM、MAE/RMSE/p95、前景覆盖率误差、mask IoU；方向检测，不放大图像）与 `selftest`（6 项离线检查、约 4 s、无 GPU/引擎）。
@@ -74,10 +77,10 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
 | wuwa_bridge | RenderDoc 3422 | 681 / 19,192 | 0.3394 / 0.2997 / 0.1489 | 0.3332 / 0.2721 |
 | wuwa_f3422 | RenderDoc 3422（全帧） | 1718 / 19,131 | 0.2381 / 0.4631 / 0.3737 | 0.3613 / 0.3765 |
 | wuwa_f3765 | RenderDoc 3765 | 19 / 19 | 0.5321 / 0.3311 / 0.0318 | 0.7315 / 0.2070 |
-| zzz_frame01 | 3DMigoto Frame01 | 213 / 58 | 0.2123 / 0.3279 / 0.1307 | —（有截图，未打分） |
+| zzz_frame01 | 3DMigoto Frame01 | 213 / 58 | 0.2368 / 0.3167 / 0.2473 | 0.2400 / 0.4902（coverage 0.7383） |
 | unity_synth | 合成 Unity 包 | 3 instances | 无参考帧，无法打分 | — |
 
-`—` 只表示该引擎这一侧没有可比的数字（`zzz_frame01` 的 Unity 截图存在，但 `metrics` 只给最新一张打主分、另一张记 `also`；这个案例从没在 Unity 侧打过）。
+`—` 只表示该引擎这一侧没有可比的数字；`also` 记录另一张截图的分数。`zzz_frame01` 这一轮 UE/Unity 两侧都打了分，但**不要拿它的 ssim 当放置质量**：参考帧是 UI 角色界面，场景是从世界相机渲染的 3D 角色，前景/背景构成不同；UE 那张被判 `flipped` 是方向检测在这种构成上的误判。
 `status` 在**干净状态**下 6 个案例都是 `next=done`；跑过 `scripts/dev/mcp_acceptance.py` 之后 `wuwa_f3765` 会变成 `next=emit-unity`（验收自己重建了 build），重发射一次即恢复。
 
 **阶段 B 工作台（已完成，独立于上面的补全项）**
@@ -100,11 +103,17 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
   卡片上有 OBJ/GLB 下载，查看器里也有；资源浏览器顶部按当前筛选/分组导出（`OBJ · N` / `GLB · N`），大案例走后台作业（`workspace/_exports/<id>.zip`）。
   约定：GLB 保持包的左上原点 UV（glTF 一致），OBJ 翻 V（OBJ 是左下原点）；GLB 索引在 >65535 顶点时用 uint32。
   子集导出只打包这些网格材质引用的贴图；整案例导出打包场景列出的全部贴图（WuWa 一帧约 600 MB，所以不是默认）。
-- ✅ **任务管理**：任务总览左侧可**新建任务**（填本机 .rdc 路径 → 读 `RDOC` 魔数确认 → 填目录 id 与显示名 → 建目录 →
-  自动启动 `survey` 后台作业）与**重命名**（只改 `case.json -> title`，目录 id 不变，因为引擎资产路径与截图文件名由它派生）。
+- ✅ **任务管理（三种来源）**：任务总览左侧可**新建任务**，按来源填本机路径（也可自动判断）：
+  RenderDoc `.rdc` 读 `RDOC` 魔数；3DMigoto 检查 FrameAnalysis 的 `log.txt` + 逐 draw 转储（有 `capture-summary.json` 时显示 draw/dispatch 次数与唯一数据量）；Unity 检查 `UnityFS/UnityWeb/UnityRaw/UnityArchive` 头。
+  建目录后按来源自动启动第一步：`survey`（RenderDoc）/ `ingest-3dmigoto` / `ingest-unity` 后台作业；3DMigoto 摄入也进了步骤图（`export/extract.json` 是它的产物）。
+  另有**重命名**（只改 `case.json -> title`，目录 id 不变，因为引擎资产路径与截图文件名由它派生）。
   左侧还有任务过滤框。目录 id 校验 `[A-Za-z0-9._-]`、拒绝保留名/已存在/路径穿越。
-  ⚠ 没有做**大文件上传**：1–2 GB 的 .rdc 只能填本机已有路径；也没有做删除任务（有 `casectl.delete`，页面未接）。
-  ⚠ 新建后自动跑的是 survey（列 draw、找 pass），会真的启动 qrenderdoc 分析整个截帧，大文件上要几分钟。
+  ✅ 实测：页面自动识别 FrameAnalysis（`zzz-frame01`，20,986 个文件 / 354 次 draw-dispatch / 9.38 GB 唯一数据）与 Unity bundle（UnityFS）；
+  从页面新建一个 Unity 任务后 `ingest-unity` 作业成功产出 `build/scene.json`，next 随即指向 `emit-ue`；
+  走同一套 create→run 接口建 3DMigoto 任务并摄入成功：213 draws / 167 meshes / 83 textures，13 s（探针目录已删除）。
+  ✅ 顺带修掉 `caseinfo._next_step` 里被提前 `return` 挡住的必需阶段分支：空案例现在会建议 survey/ingest，而不是直接报 done。
+  ⚠ 没有做**大文件上传**：1–2 GB 的 .rdc 与十几 GB 的 FrameAnalysis 目录只能填本机已有路径；也没有做删除任务（有 `casectl.delete`，页面未接）。
+  ⚠ 新建后自动跑的是该来源的第一步：`.rdc` 的 survey 会真的启动 qrenderdoc 分析整个截帧，大文件上要几分钟；3DMigoto 摄入要读整个转储。
 - ✅ **按画面定位资产 + 多维分类**（`renderforge/web/locate.py`）：在参考帧上点击 → 射线逐三角形求交 → 按深度列出命中，
   选中后显示材质/贴图/同材质同贴图的网格，并把列表收窄到命中项。分类从“只有源资产名”扩到 6 个分组维度
   （源名 / 类别码 / 关卡目录 / 渲染方式 / 未知分组 / 屏幕占比）+ 叠加筛选（画面内、画面占比、已识别/未知）。
@@ -117,7 +126,7 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
   API JSON 紧凑序列化 + gzip（资源列表 352 KB → 28 KB）；静态文件 ETag/304（three.js 2.1 MB 不再每次重下）、缩略图 `max-age`；
   导出压缩走 `compresslevel=6`。实测：`/api/case/<n>` 0.36–0.82 s → 10 ms；`scan_all` 0.65 s → 3.8 ms（热）；
   30 张冷缩略图 1.4 s → 93 ms，热 14 ms；三个 JSON 大文件常驻内存约 170 MB（按字节预算的 LRU）。
-- ✅ 验收 `scripts/dev/web_acceptance.py` **63 项**（约 50 s）：原有 32 项，加 GLB 结构/OBJ 面数/Content-Disposition/贴图 PNG/zip 内 scene.json 原样/导出作业起停与下载/坏 id 拒绝，定位（6 点散测命中、深度单调、命中网格存在、关联有材质、坏坐标 400、无相机案例明确拒绝）、分类（已识别计数、画面内子集、类别码可解析、kind 词表），以及任务管理（截帧检查、拒绝非 rdc、新建、列名、重命名、目录不变、重复与路径穿越拒绝）。
+- ✅ 验收 `scripts/dev/web_acceptance.py` **68 项**（约 50 s）：原有 32 项，加 GLB 结构/OBJ 面数/Content-Disposition/贴图 PNG/zip 内 scene.json 原样/导出作业起停与下载/坏 id 拒绝，定位（6 点散测命中、深度单调、命中网格存在、关联有材质、坏坐标 400、无相机案例明确拒绝）、分类（已识别计数、画面内子集、类别码可解析、kind 词表），以及任务管理（截帧检查、拒绝未知输入、3DMigoto 与 Unity 的按来源/自动检查、三种来源新建与 `start` 字段、列名、重命名、目录不变、重复与路径穿越拒绝）。
 - ⚠ 边界：页面截图是 ≤1600 px 副本（非截帧原始分辨率）；资源按选触发导入未接（`RF_ONLY_KIND`/`RF_HIDE_MESH` 已在导入器里）；**Agent 对话未内嵌**；编辑器控制（L6）无入口；植被散片类网格 3D 预览仍像"一堆草叶"（数据特性）。
   导出只给"所见数据"：网格是未放置的原始网格（世界变换在 `INSTANCES.csv`），材质是预览级，导出里的贴图引用按贴图文件名而不是材质槽语义。
 
@@ -134,7 +143,7 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
 - 鸣潮透明/水一轮的如实状态：透明 pass（67 draw）独立导出并合并，73 个实例有仿射变换；水面精确识别为 `SM_Old_Wat_08AH`（`m0517`，4,004 顶点 / 7,346 三角），**可见性已解决**——根因是顶点缓冲 SRV 解出的 `u` 恒为 1.0（`has_uv: false`），材质用世界投影 UV 绕开，**不是**负 Z 缩放/绕序问题（先前那个猜测是错的，负面 Z 缩放仍在 `matrix` 里但纹理由世界坐标采样，不经过网格 UV）。
   仍未还原：水线/泡沫/折射/吸收/焦散、双/多层波纹法线、水面反射；粒子与 billboard 无可靠变换已跳过；depth-only 植被 pass 与主 pass 重复、未合并。
 - 透明混合模式里 5/12 是 **judgement**（`luminance`：游戏用深度淡出遮罩，这里用贴图亮度替代），不是从着色器证明的；导入结果里逐条标了 `proven` / `judgement`，不要把它们当成同一置信度。
-- ZZZ 适配器只在矩阵和剪影 IoU 上验证过，**没有接进 CLI、没有端到端渲染**；`zzz_frame01` 出厂路径仍是 `build-model` 的单位放置，所以它的 0.212 是预期值，不代表适配器不行。
+- ZZZ 适配器已接进 `build-model` 并端到端渲染过（UE + Unity）：58/58 个被选中的角色 draw 都有世界矩阵，画面上角色直立、全身、贴图完整。**但它只解决了“放在哪”**：141/213 个 draw 没有刚性矩阵（UI/非刚性 pass）被跳过；头/脸仍因 GPU 间接绘制缺失；蒙皮仍是 bind pose；参考帧是 UI 界面，所以 ssim/mask 数字不能说明放置好坏（几何证据是 draw 106 的 RT 剪影 IoU 0.9783）。
 - `wuwa_f3765` 的 UE ssim 0.532 看着不错，但**前景覆盖率误差 0.0318 是在很小的场景上算的**：画面大部分是背景，主导背景色占优，覆盖率对"少了半个场景"不敏感；同一案例 Unity 侧 ssim 0.7315 却 coverage_error 0.7595（该图还被检测为上下颠倒）。不要用单张图的 ssim 比较案例之间的好坏。
 - RenderDoc 版本：本机 1.45，上游已到 1.46；renderdoc-mcp 二进制只有 v0.3.0（内置 1.43 运行库），v0.3.1 需自行编译。
 - 验证指标是**同机位近似**：相机近似求解（姿态/fov 可有几个百分点差异），UE/Unity 光照也不是游戏的，所以“重建得不错”的案例依然有明显绝对误差。
@@ -155,7 +164,7 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
 
 ## 下一步（按价值排序）
 
-1. **把 ZZZ 适配器接进 CLI**（适配器已写好、矩阵已验证）：在 `build`/`build-model` 加一条 `--adapter zzz` 路径，然后做一次端到端 UE 渲染，看放好的场景是否真的对上参考剪影。这是唯一能把 ZZZ 从 0.212 往前推的动作。
+1. ✅ **ZZZ 适配器接进 build**（本轮完成）：游戏档案 `placement_adapter: zzz`，`build-model` 自动使用；58 个角色实例带世界矩阵与 cb3 世界相机，UE 与 Unity 都端到端渲染过。`--adapter none` 回到单位放置。剩余缺口是头/脸（GPU 间接绘制）、bind pose、141 个无刚性矩阵的 UI/非刚性 draw。
 2. **天空穹顶**：`m0000`（eid 2037，2159 顶点，局部半径 41,431，`psDiscard`）本来就在场景里，只是和引擎天叠在一起。把它作为一个不受光的天空壳单独发射（或者反过来：识别出它并跳过引擎大气），比重建大气便宜，而且能换掉引擎的通用天。
    （`sky_radius` 规则丢的不是它——是云层 `SM_CloudCover_01` 和一个 LightFog 网格。）
 3. **逐物体差异指标**：现在只有整帧数字，回答不了"哪栋楼不对"。按源资产名对指标分组即可。

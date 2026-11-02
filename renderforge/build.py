@@ -426,9 +426,16 @@ def build(export_dir, out_dir, draw_filter=None, tol=3e-2, affine_tol=0.15, stri
     return scene
 
 
-def build_model_space(export_dir, out_dir, space="unity", pick=None, min_tris=1, basis=None):
+def build_model_space(export_dir, out_dir, space="unity", pick=None, min_tris=1, basis=None, placement=None):
     """Scene package from an extract that has no post-VS data (e.g. 3DMigoto Frame Analysis).
-    Meshes are placed at identity in their own model space; `space` tells emitters which convention that is."""
+
+    Without `placement`, every mesh is placed at identity in its own model space (and `basis` may rotate that
+    space). With `placement` (the dict a per-game adapter returns), each picked draw uses its own row-vector
+    world matrix and the capture camera; a draw the adapter could not place is skipped and counted, never
+    placed at the origin. The adapter's matrices are already world-space, so `basis` must not be applied too.
+    """
+    if placement is not None and basis is not None:
+        raise ValueError("placement already carries world matrices; model_basis must not be applied on top")
     ex = Extract(export_dir)
     out = Path(out_dir)
     if out.exists():
@@ -437,10 +444,20 @@ def build_model_space(export_dir, out_dir, space="unity", pick=None, min_tris=1,
     scene = {"space": space, "meshes": {}, "materials": {}, "instances": [], "textures": {}, "camera": None,
              "vp": None, "vp_match": 0.0}
     done = set()
-    report = {"draws": len(ex.draws), "placed": 0, "skipped": 0, "no_uv": 0}
+    # JSON round-trips draw ids to strings; accept either so a saved placement dict can be replayed
+    world = {int(k): v for k, v in placement["world"].items()} if placement and placement.get("world") else None
+    report = {"draws": len(ex.draws), "placed": 0, "skipped": 0, "no_uv": 0,
+              "placement": "world" if world is not None else "identity"}
     for d in ex.draws:
         if pick and not pick(d):
             continue
+        W = np.eye(4)
+        if world is not None:
+            wl = world.get(int(d["eid"]))
+            if wl is None:
+                report["no_world"] = report.get("no_world", 0) + 1
+                continue
+            W = np.asarray(wl, dtype=np.float64).reshape(4, 4)
         mesh = ex.meshes[d["mesh"]]
         names = {a["name"]: i for i, a in enumerate(mesh["attrs"])}
         if "POSITION0" not in names or mesh["indices"] // 3 < min_tris:
@@ -486,10 +503,20 @@ def build_model_space(export_dir, out_dir, space="unity", pick=None, min_tris=1,
             if base and base not in scene["textures"]:
                 ti = ex.data["textures"][base]
                 scene["textures"][base] = {"file": str(ex.root / ti["file"]), "w": ti["w"], "h": ti["h"], "format": ti["format"]}
-        W = np.eye(4)
-        scene["instances"].append({"eid": d["eid"], "inst": 0, "mesh": mid, "matrix": W.flatten().tolist(), "location": [0.0, 0.0, 0.0],
-                                   "quat": [0.0, 0.0, 0.0, 1.0], "scale": [1.0, 1.0, 1.0], "material": key, "kind": "model-space"})
+        loc, quat, scl = decompose(W)
+        scene["instances"].append({"eid": d["eid"], "inst": 0, "mesh": mid, "matrix": W.flatten().tolist(),
+                                   "location": loc.tolist(), "quat": quat.tolist(), "scale": scl.tolist(),
+                                   "material": key, "kind": "placed" if world is not None else "model-space"})
         report["placed"] += 1
+    if placement and (placement.get("scene_camera") or placement.get("camera")):
+        # a real capture camera is the whole point of the adapter; do not replace it with the framing fallback.
+        # scene_camera is the world camera (ZZZ: cb3's 16:9 frame), not the pass-specific preview projection.
+        scene["camera"] = placement.get("scene_camera") or placement.get("camera")
+        scene["vp"] = placement.get("scene_vp") or placement.get("vp")
+        scene["adapter"] = {k: placement.get(k) for k in
+                            ("name", "source", "space", "ui_offset_ndc_x", "preview_size", "frame_size",
+                             "scene_size", "preview_to_frame", "world_ok", "draws", "world_fail")}
+        scene["adapter"]["scene_camera"] = "frame" if placement.get("frame_camera") else "preview"
     if scene["instances"] and not scene["camera"]:
         P = np.vstack([np.fromfile(out / scene["meshes"][i["mesh"]]["dir"] / "pos.f32", dtype="<f4").reshape(-1, 3) for i in scene["instances"]])
         lo, hi = P.min(0), P.max(0)

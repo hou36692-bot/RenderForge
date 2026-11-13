@@ -177,10 +177,11 @@ D:\HOU\RenderForge\workspace\endfield_pilot\...
 ## 7. Git 与远程
 
 - 远程：`origin = https://github.com/hou36692-bot/RenderForge.git`
-- 迁移基线：`main` 分支；本地 `main` 比 `origin/main` 多出：
+- 迁移基线：`main` 分支，包含以下迁移相关提交：
   - `643e0be` Add launcher-auth watch-inject capture route and record Endfield ACE result
   - `0d41e5a` Merge feat/endfield-support into main
-  - 以及本次迁移文档提交
+  - `a15d67f` Declare UnityPy dependency and add the migration hand-off entry point
+  - `00c1750` Record that the migration commits were pushed
 - 迁移包同时提供 `RenderForge.bundle`（所有分支的完整历史）。
   新机器可以直接复制 `repo/`（已含 `.git`），也可以：
   ```bash

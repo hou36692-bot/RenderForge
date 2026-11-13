@@ -189,8 +189,9 @@ D:\HOU\RenderForge\workspace\endfield_pilot\...
   git remote set-url origin https://github.com/hou36692-bot/RenderForge.git
   git branch feat/endfield-support origin/feat/endfield-support
   ```
-- **本地提交尚未 push**（迁移时没有擅自改远程）。用户确认后才 `git push origin main`。
-  远程的 `main` 仍停在 `28733b8`；push 后 GitHub 上的 PR #1 历史不受影响。
+- **本地提交已 push 到 GitHub**（2026-11-13，用户授权）。`main` 与
+  `feat/endfield-support` 现在都与本地一致；`a15d67f` 是迁移基线提交，之后可能还有
+  文档提交。新机器直接 `git pull` 即可；GitHub 上的 PR #1 历史不受影响。
 
 ## 8. 验证清单（新机器按顺序）
 
@@ -236,7 +237,7 @@ toolbox/recipes.json         工作流
 
 ## 10. 交接时未完成 / 待确认
 
-- [ ] 本地 `main` 的两个提交尚未 push 到 GitHub（需用户确认）。
+- [x] 本地 `main` 与 `feat/endfield-support` 已 push 到 GitHub（2026-11-13）。
 - [ ] `workspace/` 的裁剪快照不是完整数据；真实 `.rdc`/FrameAnalysis 仍在原机器仓库外。
 - [ ] 新机器未安装的外部工具（见第 5 节）由用户按需安装，`doctor` 会如实报 `MISSING`。
 - [ ] 迁移包里的 `repo/` 已含 `CLAUDE.md`、`HANDOFF.md`、`.mcp.json`、`.claude/` 等

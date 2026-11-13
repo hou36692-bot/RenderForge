@@ -4,6 +4,7 @@ workspace/
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
 *.rdc
 
 # Machine-local configuration. `.mcp.example.json` is the template that IS published.

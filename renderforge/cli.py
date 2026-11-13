@@ -35,6 +35,7 @@ Capture (standalone, never part of `run`; Endfield first):
   python -m renderforge capture <case> --game endfield --capture-action targets
   python -m renderforge capture <case> --game endfield --capture-action launch --exe <game.exe> --allow-launch [--capture-args="..."] [--working-dir <dir>]
   python -m renderforge capture <case> --game endfield --capture-action trigger [--target-ident N] [--capture-delay S] [--capture-timeout S] [--capture-frames N]
+  python -m renderforge capture <case> --game endfield --capture-action watch-inject [--process-name Endfield.exe] [--capture-timeout 600] [--capture-delay 60]
 
 Cases live in workspace/<case>/ ; original .rdc files are only read, never copied or modified.
 """
@@ -378,7 +379,7 @@ def cmd_capture(a):
         res = pipeline.step_capture(a.case, action=a.capture_action, game=a.game, exe=a.exe, cmdline=a.capture_args,
                                     working_dir=a.working_dir, target_ident=a.target_ident, delay=a.capture_delay,
                                     timeout=a.capture_timeout, frames=a.capture_frames,
-                                    allow_launch=a.allow_launch)
+                                    allow_launch=a.allow_launch, process_name=a.process_name)
     except Exception as e:  # noqa: BLE001 - report as JSON like the other result-producing commands
         res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
     print(json.dumps(res, indent=1, ensure_ascii=False, default=str))
@@ -491,8 +492,9 @@ def main(argv=None):
         p.add_argument("--port", type=int, default=8770, help="web: port for the local workbench")
         p.add_argument("--host", default="127.0.0.1", help="web: bind address (127.0.0.1 keeps it local)")
         if name == "capture":
-            p.add_argument("--capture-action", choices=("targets", "launch", "trigger"), default="trigger",
-                           help="capture: list RenderDoc targets, launch the program under RenderDoc, or trigger a capture")
+            p.add_argument("--capture-action", choices=("targets", "launch", "trigger", "watch-inject"), default="trigger",
+                           help="capture: list targets, launch under RenderDoc, trigger, or inject into a new process then trigger")
+            p.add_argument("--process-name", help="capture watch-inject: image name to wait for (profile default)")
             p.add_argument("--exe", help="capture launch: program to start")
             p.add_argument("--capture-args", help="capture launch: raw command-line text (use --capture-args=\"-x\" for leading dashes)")
             p.add_argument("--working-dir", help="capture launch: working directory")

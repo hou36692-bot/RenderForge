@@ -155,7 +155,11 @@
    "capture_launch": {
     "exe": "D:\\Hypergryph Launcher\\games\\Arknights Endfield\\Endfield.exe",
     "args": "-force-d3d11",
-    "target": "Endfield"
+    "target": "Endfield",
+    "process": "Endfield.exe",
+    "launcher_required": true,
+    "direct_launch_result": "Exits after ~27 s: PC launch auth failed (errorCode 10100); the game rejects a parent process that is not the official launcher.",
+    "ace_detection": "RenderDoc injection succeeds, then AntiCheatExpert refuses to run the game: dialog '检测到不兼容程序 RenderDoc，请关闭并重启机器后再试。' Not bypassed; do not use evasion builds."
    },
    "route_status": {
     "renderdoc": "candidate"

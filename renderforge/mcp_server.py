@@ -144,7 +144,7 @@ _STEPS = {
 _STEP_KEYS = ("rdc", "range", "rt_count", "extra_export", "extra_pass", "bundle", "frame_dir", "game", "index",
               "ids", "shot", "max_instances", "emissive", "no_instanced_index", "ticks", "cmd", "eids", "vs")
 # capture-only keys: kept out of _STEP_KEYS so a plain `run` can never receive them
-_CAPTURE_KEYS = ("action", "exe", "cmdline", "working_dir", "target_ident", "delay", "timeout", "frames")
+_CAPTURE_KEYS = ("action", "exe", "cmdline", "working_dir", "target_ident", "delay", "timeout", "frames", "process_name")
 # step-style capture name -> CLI option name (for job_start)
 _CAPTURE_CLI = {"action": "capture_action", "cmdline": "capture_args", "delay": "capture_delay",
                 "timeout": "capture_timeout", "frames": "capture_frames"}

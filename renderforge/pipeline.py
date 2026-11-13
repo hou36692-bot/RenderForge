@@ -367,7 +367,7 @@ def _captured_paths(res, case_rdc=None):
 
 
 def step_capture(case, action="trigger", game=None, exe=None, cmdline=None, working_dir=None, target_ident=None,
-                 delay=0, timeout=60, frames=1, allow_launch=False, **kw):
+                 delay=0, timeout=60, frames=1, allow_launch=False, process_name=None, **kw):
     """Standalone RenderDoc capture request (targets / launch / trigger). Never part of the `run` graph: it can start
     a program, so it only runs when asked for, and `launch` needs an explicit allow_launch=True.
 
@@ -377,7 +377,7 @@ def step_capture(case, action="trigger", game=None, exe=None, cmdline=None, work
     action = action or "trigger"
     res = capture.request(_case_dir(case), action=action, game=game, exe=exe, cmdline=cmdline,
                           working_dir=working_dir, target_ident=target_ident, delay=delay, timeout=timeout,
-                          frames=frames, allow_launch=bool(allow_launch))
+                          frames=frames, allow_launch=bool(allow_launch), process_name=process_name)
     res = res if isinstance(res, dict) else {"ok": False, "error": f"capture.request returned {type(res).__name__}"}
     if res.get("ok") is not True:
         err = res.get("error") or res.get("message") or json.dumps(res, ensure_ascii=False, default=str)[:500]

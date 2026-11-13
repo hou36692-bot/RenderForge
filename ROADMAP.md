@@ -28,7 +28,7 @@ L9 可视化        ████████░░ 80%  任务总览✅ · 工�
 | 鸣潮 WuWa | UE4 | RenderDoc ✅ | ✅ | CUE4Parse ✅(用户) | 全库索引，96% 实例带源名 | ✅ | ✅ | 透明 pass 已合并、逐材质混合模式已分；水面可见（UV 缺失已用世界投影绕过），但水线/泡沫/折射未还原；粒子/billboard 跳过；天空用引擎大气，游戏天空未还原 |
 | 绝区零 ZZZ | Unity | 3DMigoto ✅ | ✅ | AnimeStudio ✅(用户,游戏未装) | 世界矩阵+相机已接 `build-model`，58 角色实例放置 | ✅ 角色 | ✅ 角色 | 头/脸(GPU 间接绘制)；141/213 draw 无刚性矩阵（UI pass）；bind pose；参考帧是 UI 界面，指标不能当放置质量 |
 | 原神 / 星铁 | Unity | 3DMigoto(未测) | 预期可用 | AnimeStudio(未测) | ⬜ | ⬜ | ⬜ | 本机无安装、无截帧：全部未验证 |
-| 终末地 Endfield | Unity 2021.3 IL2CPP | 未试(有反作弊) | — | ⚠ VFS 加密，通用工具打不开 | ⬜ | ⬜ | ⬜ | 需要游戏专用源适配器；先确认是否要做 |
+| 终末地 Endfield | Unity 2021.3 IL2CPP | ⚠ RenderDoc 注入成功但被 ACE 检测拦截（不绕过） | — | ⚠ VFS 加密，通用工具打不开 | ⬜ | ⬜ | ⬜ | 捕获路线被反作弊拒绝；源资源需专用适配器，只做小规模离线导出验证 |
 | 通用 Unity 包 | Unity | — | UnityPy ✅(合成) | UnityPy/AssetRipper ✅(合成) | — | ✅(合成) | ✅(合成) | 没有本机可读的商业游戏样本 |
 | 通用 UE pak | UE | RenderDoc | ✅ | CUE4Parse | ✅ | ✅ | ✅ | 每个游戏要 EGame/AES/usmap |
 

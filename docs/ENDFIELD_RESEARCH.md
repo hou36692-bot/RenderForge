@@ -27,6 +27,16 @@
 
 矩阵类型 18/27、世界/局部含义、单位与 Blender 换轴，仍须在真实小样本上比较。工具输出写着 `worldResolution: world` 不是独立验证。
 
+## 现场截帧实测（2026-10-29）
+
+结论：**RenderDoc 被终末地反作弊明确拒绝，捕获路线在本机不可用。**
+
+- 直接启动 `Endfield.exe`（不经官方启动器）：游戏跑约 27 秒后自行退出。Unity 日志明确是启动器鉴权失败：`PC launch auth failed, errorCode: 10100`，并把父进程（python.exe）当成非法启动器。与 RenderDoc 无关。
+- 通过官方启动器启动游戏，监听新进程并在图形设备初始化前注入 RenderDoc：注入本身成功（`Injecting into PID 34560`、`Launched as ID 38920`），随后 AntiCheatExpert 弹窗拒绝运行：**“检测到不兼容程序 RenderDoc，请关闭并重启机器后再试。”**
+- 因此：**不尝试用魔改/改签的 RenderDoc 或任何规避检测的手段绕过。** 这类“魔改版”在这里的唯一作用就是让反作弊认不出调试器，属于规避保护，联网游戏还有账号风险。RenderForge 也不会为绕过反作弊提供配置。
+- 若之后能通过被允许的渠道取得 `.rdc`（例如开发/调试构建或游戏方许可的捕获），现有 `survey → export → build` 链路可以直接处理，无需改动。
+- 现场采集改用不接触游戏进程的离线资源导出（EndfieldStudio 小规模验证）；它读本机 VFS，不注入、不启动游戏。
+
 ## 本机检查
 
 检查命令使用项目 `.venv/Scripts/python.exe`，第三方数据读取使用 `-I -B`。游戏文件保持只读。具体值在 [本地检查记录](../workspace/endfield_pilot/preflight/local_inventory.json)。
